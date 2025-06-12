@@ -102,11 +102,23 @@ def main():
     st.header("📝 SIEM Rule Input")
     
     example_rules = {
-        "Suspicious PowerShell": """index=main sourcetype="WinEventLog:Security" EventCode=4688 | search process_name="*powershell.exe*" command_line="*-EncodedCommand*" | stats count by host, user, process_name, command_line""",
-        "Registry Persistence": """index=main sourcetype="WinEventLog:System" | search registry_path="*\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\*" | stats count by host, registry_path, registry_value""",
-        "Suspicious Network Connection": """GET /logs/_search { "query": { "bool": { "must": [ {"term": {"event_type": "network"}}, {"range": {"destination_port": {"gte": 4444, "lte": 4445}}} ] } } }""",
-        "Active Directory Enumeration": """index=main source="WinEventLog:Security" EventCode=4624 | search Logon_Type=3 | stats count by src_ip, user | where count > 50""",
-        "Suspicious File Creation": """index=main sourcetype="WinEventLog:System" | search EventCode=11 | search TargetFilename="*\\temp\\*.exe" | stats count by Computer, TargetFilename"""
+        "Splunk - Suspicious PowerShell": """index=main sourcetype="WinEventLog:Security" EventCode=4688 | search process_name="*powershell.exe*" command_line="*-EncodedCommand*" | stats count by host, user, process_name, command_line""",
+        
+        "Splunk - Registry Persistence": """index=main sourcetype="WinEventLog:System" | search registry_path="*\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\*" | stats count by host, registry_path, registry_value""",
+        
+        "Microsoft Sentinel - Suspicious Login": """SecurityEvent | where EventID == 4624 | where LogonType == 10 | summarize count() by Account, IpAddress | where count_ > 10""",
+        
+        "Microsoft Sentinel - Process Creation": """DeviceProcessEvents | where ProcessCommandLine contains "powershell" and ProcessCommandLine contains "-EncodedCommand" | summarize count() by DeviceName, AccountName""",
+        
+        "Elastic (ELK) - Network Connection": """{"query": {"bool": {"must": [{"term": {"event_type": "network"}}, {"range": {"destination_port": {"gte": 4444, "lte": 4445}}}]}}}""",
+        
+        "Elastic (ELK) - Suspicious Process": """{"query": {"bool": {"must": [{"wildcard": {"process.name": "*powershell*"}}, {"match": {"process.args": "EncodedCommand"}}]}}}""",
+        
+        "Google Chronicle - Domain Resolution": """metadata.event_type = "NETWORK_DNS" AND network.dns.questions.name = /.*suspicious-domain\\.com.*/ AND metadata.collected_timestamp.seconds > 86400""",
+        
+        "IBM QRadar - Failed Logins": """SELECT sourceip, username, eventname FROM events WHERE eventname = 'Failed Login' AND starttime > NOW() - INTERVAL '24 HOURS' GROUP BY sourceip HAVING COUNT(*) > 10""",
+        
+        "Sumo Logic - File Creation": """_source="windows-security" | parse "TargetFilename=*" as filename | where filename matches "*temp*.exe" | timeslice 1h | count by _timeslice, filename"""
     }
     
     col1, col2 = st.columns([2, 1])
