@@ -305,73 +305,119 @@ def display_tab_previews():
     # Tab 2 Preview
     def show_incident_response_preview():
         st.header("📋 Incident Response Plan")
-        st.info("👆 **Run analysis first to generate a comprehensive incident response plan**")
+        st.info("👆 **Run analysis first to generate platform-specific SIEM and EDR investigation procedures**")
         
-        st.subheader("🔍 SOC L1 Investigation Steps")
-        st.markdown("""
-        **What L1 analysts will receive:**
-        - ✅ Initial triage procedures
-        - ✅ Basic analysis commands
-        - ✅ Evidence collection steps
-        - ✅ Clear escalation criteria
-        """)
-        
-        with st.expander("🔍 Example L1 Investigation Step"):
-            st.markdown("""
-            **Step:** Verify PowerShell execution and command line analysis
-            
-            **Commands to run:**
-            ```bash
-            Get-WinEvent -FilterHashtable @{LogName='Security'; ID=4688} | Where-Object {$_.Message -like "*powershell*"}
-            Get-Process powershell | Select-Object Id,ProcessName,StartTime,Path
-            ```
-            
-            **Expected Outcome:** Identify suspicious PowerShell processes with encoded commands
-            
-            **Escalation Criteria:** If encoded/obfuscated commands are found or unknown processes detected
-            """)
-        
-        st.subheader("🔬 SOC L2 Investigation Steps")
-        st.markdown("""
-        **What L2 analysts will receive:**
-        - 🔍 Deep analysis procedures
-        - 🔍 Advanced threat hunting queries
-        - 🔍 Forensic analysis steps
-        - 🔍 Technical investigation guidance
-        """)
-        
-        with st.expander("🔬 Example L2 Investigation Step"):
-            st.markdown("""
-            **Step:** PowerShell command decoding and malware analysis
-            
-            **Commands to run:**
-            ```powershell
-            # Decode base64 PowerShell commands
-            [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($encodedCommand))
-            
-            # Check for process injection indicators
-            Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-Sysmon/Operational'; ID=8}
-            ```
-            
-            **Expected Outcome:** Decoded malicious payload and injection evidence
-            
-            **Escalation Criteria:** Confirmed malware or advanced persistent threat indicators
-            """)
-        
-        st.subheader("👥 Resolver Team Recommendations")
-        st.markdown("""
-        **Teams that will receive specific actions:**
-        - 🔥 **Firewall Team** - Block malicious IPs and domains
-        - 🔐 **Identity Team** - Reset compromised accounts
-        - 🎫 **Service Desk** - User notifications and remediation
-        - 🌐 **Network Team** - Isolate affected systems
-        """)
+        st.subheader("🔍 What You'll Get:")
         
         col1, col2 = st.columns(2)
         with col1:
-            st.info("🔴 **High Priority Actions**\nImmediate containment (0-15 min)")
+            st.markdown("""
+            **🎯 Platform-Specific SIEM Steps:**
+            - ✅ Auto-detects your SIEM platform
+            - ✅ Splunk, Sentinel, Chronicle, QRadar, ELK support
+            - ✅ Platform-specific query syntax
+            - ✅ Optimized investigation procedures
+            
+            **📊 Supported SIEM Platforms:**
+            - 🟠 **Splunk** - SPL queries and commands
+            - 🔵 **Microsoft Sentinel** - KQL queries
+            - 🟡 **Google Chronicle** - UDM search syntax
+            - 🔴 **IBM QRadar** - SQL-based queries
+            - 🟢 **Elastic (ELK)** - JSON query DSL
+            """)
+        
         with col2:
-            st.info("🟡 **Medium Priority Actions**\nInvestigation support (15-60 min)")
+            st.markdown("""
+            **🛡️ Multi-EDR Integration:**
+            - ✅ CrowdStrike Falcon hunting queries
+            - ✅ Microsoft Defender for Endpoint
+            - ✅ SentinelOne deep visibility
+            - ✅ Carbon Black threat hunting
+            
+            **⚡ Investigation Focus:**
+            - 🔍 **L1 Triage** - Quick assessment (15-30 min)
+            - 🔬 **L2 Analysis** - Deep investigation (30-60 min)
+            - 🎯 **Platform Commands** - Copy-paste ready
+            - 📈 **Escalation Criteria** - Clear decision points
+            """)
+        
+        st.subheader("🔍 SOC L1 Investigation Steps")
+        with st.expander("🔍 Example: Splunk + CrowdStrike Investigation"):
+            st.markdown("""
+            **Step:** Investigate PowerShell execution with encoded commands
+            
+            **Splunk Query:**
+            ```spl
+            index=main sourcetype="WinEventLog:Security" EventCode=4688 
+            | search process_name="*powershell.exe*" command_line="*-EncodedCommand*" 
+            | stats count by host, user, process_name, command_line
+            ```
+            
+            **CrowdStrike Falcon:**
+            ```bash
+            event_platform=Win event_simpleName=ProcessRollup2 ImageFileName="*powershell.exe"
+            | search CommandLine="*-EncodedCommand*"
+            | stats count by ComputerName, UserName
+            ```
+            
+            **Expected Outcome:** Identify hosts with suspicious PowerShell activity
+            **Timeline:** 15-20 minutes
+            **Escalation:** If >5 hosts affected or unknown encoded content
+            """)
+        
+        st.subheader("🔬 SOC L2 Investigation Steps")
+        with st.expander("🔬 Example: Multi-Platform Deep Analysis"):
+            st.markdown("""
+            **Step:** Decode PowerShell content and analyze persistence mechanisms
+            
+            **Microsoft Sentinel Advanced:**
+            ```kql
+            DeviceProcessEvents 
+            | where ProcessCommandLine contains "-EncodedCommand"
+            | extend DecodedCommand = base64_decode_tostring(extract(@"-EncodedCommand ([A-Za-z0-9+/=]+)", 1, ProcessCommandLine))
+            | where DecodedCommand contains "persistence" or DecodedCommand contains "registry"
+            ```
+            
+            **Multi-EDR Correlation:**
+            - **CrowdStrike**: Process injection detection
+            - **Microsoft Defender**: Behavioral analysis 
+            - **SentinelOne**: File system monitoring
+            
+            **Timeline:** 45-60 minutes
+            **Escalation:** Confirmed malware or APT indicators
+            """)
+        
+        st.subheader("👥 Resolver Team Actions")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("""
+            **🔥 Firewall Team:**
+            - Block identified malicious IPs
+            - Update firewall rules with IOCs
+            - Implement network segmentation
+            
+            **🔐 Identity Team:**
+            - Force password reset for affected accounts
+            - Review and revoke suspicious sessions
+            - Implement conditional access policies
+            """)
+        
+        with col2:
+            st.markdown("""
+            **🎫 Service Desk Team:**
+            - Notify affected users with security guidance
+            - Coordinate system isolation procedures
+            - Update incident tickets with findings
+            
+            **🌐 Network Team:**
+            - Monitor for lateral movement
+            - Implement traffic filtering
+            - Isolate affected network segments
+            """)
+        
+        st.success("🚀 **Platform Detection**: Automatically detects SIEM platform from your rule syntax!")
+        st.info("💡 **Pro Tip**: The system provides copy-paste ready commands for your specific SIEM and EDR platforms")
     
     # Tab 3 Preview
     def show_soar_workflow_preview():
