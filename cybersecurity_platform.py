@@ -129,24 +129,241 @@ Provide a clear, natural language explanation of what this rule detects:"""
             st.error(f"Error in translation: {str(e)}")
             return f"Detection rule for monitoring: {str(iocs_dict)}"
 
-    def identify_data_source(self, rule_description: str) -> str:
-        """Step 4: Identify MITRE ATT&CK data source"""
-        data_sources = {
-            "process": "Command: Command Execution",
-            "registry": "Windows Registry: Windows Registry Key Modification",
-            "file": "File: File Creation",
-            "network": "Network Traffic: Network Traffic Flow",
-            "endpoint": "Process: Process Creation",
-            "authentication": "Logon Session: Logon Session Creation",
-            "service": "Service: Service Creation"
+    def identify_siem_platform(self, siem_rule: str) -> str:
+        """Identify the SIEM platform from the rule syntax"""
+        rule_lower = siem_rule.lower()
+        
+        # SIEM platform detection patterns
+        siem_patterns = {
+            "Splunk": ["index=", "sourcetype=", "| search", "| stats", "| eval", "| where"],
+            "Microsoft Sentinel": ["securityevent", "signinlogs", "auditlogs", "| where", "| summarize", "kusto"],
+            "Google Chronicle": ["metadata.event_type", "principal.hostname", "target.hostname", "udm."],
+            "IBM QRadar": ["select", "from events", "where", "group by", "order by", "last"],
+            "Elastic (ELK)": ['"query":', '"bool":', '"must":', '"range":', '"term":', '"match":'],
+            "Sumo Logic": ["_source=", "_sourceCategory=", "| parse", "| timeslice", "| count"],
+            "LogRhythm": ["classification=", "direction=", "action=", "msgclass="],
+            "ArcSight": ["devicevendor=", "deviceproduct=", "categorysignificance="]
         }
         
-        rule_lower = rule_description.lower()
-        for keyword, data_source in data_sources.items():
-            if keyword in rule_lower:
-                return data_source
+        # Check for platform-specific patterns
+        for platform, patterns in siem_patterns.items():
+            pattern_matches = sum(1 for pattern in patterns if pattern in rule_lower)
+            if pattern_matches >= 2:  # Require at least 2 matching patterns
+                return platform
         
-        return "Process: Process Creation"
+        # Fallback detection based on syntax style
+        if any(pattern in rule_lower for pattern in ["index=", "sourcetype=", "|"]):
+            return "Splunk"
+        elif any(pattern in rule_lower for pattern in ['"query":', '"bool":']):
+            return "Elastic (ELK)"
+        elif any(pattern in rule_lower for pattern in ["| where", "| summarize"]):
+            return "Microsoft Sentinel"
+        
+        return "Generic SIEM"
+
+    def generate_siem_specific_commands(self, platform: str, rule_description: str, mitre_techniques: List[TechniqueResult]) -> Dict[str, List[str]]:
+        """Generate platform-specific SIEM investigation commands"""
+        
+        # Extract key indicators for search refinement
+        key_indicators = []
+        if mitre_techniques:
+            top_technique = mitre_techniques[0]
+            if "powershell" in rule_description.lower():
+                key_indicators = ["powershell.exe", "EncodedCommand", "Invoke-Expression"]
+            elif "registry" in rule_description.lower():
+                key_indicators = ["Registry", "HKEY", "Run"]
+            elif "network" in rule_description.lower():
+                key_indicators = ["network", "connection", "port"]
+            elif "process" in rule_description.lower():
+                key_indicators = ["process", "execution", "cmd.exe"]
+        
+        commands = {
+            "Splunk": [
+                f"index=main sourcetype=WinEventLog:Security EventCode=4688 | search process_name=\"*{key_indicators[0] if key_indicators else 'suspicious'}*\"",
+                f"index=main sourcetype=WinEventLog:System | head 1000 | search {key_indicators[0] if key_indicators else 'suspicious'}",
+                "| stats count by host, user, process_name | sort -count",
+                "| eval time_diff=_time-earliest | where time_diff < 3600",
+                "| lookup threat_intel.csv IOC as process_name OUTPUT threat_level",
+                "index=main earliest=-24h | rare limit=10 process_name"
+            ],
+            
+            "Microsoft Sentinel": [
+                f"SecurityEvent | where EventID == 4688 | where Process contains \"{key_indicators[0] if key_indicators else 'suspicious'}\"",
+                f"DeviceProcessEvents | where ProcessCommandLine contains \"{key_indicators[0] if key_indicators else 'suspicious'}\"",
+                "| summarize count() by AccountName, DeviceName | order by count_ desc",
+                "| where TimeGenerated > ago(24h)",
+                "| join kind=leftouter (ThreatIntelligenceIndicator) on $left.ProcessCommandLine == $right.NetworkIP",
+                "| extend SuspiciousActivity = iff(count_ > 10, \"High\", \"Normal\")"
+            ],
+            
+            "Google Chronicle": [
+                f"metadata.event_type = \"PROCESS_LAUNCH\" AND target.process.command_line CONTAINS \"{key_indicators[0] if key_indicators else 'suspicious'}\"",
+                f"principal.hostname = /regex/ AND target.process.file.full_path CONTAINS \"{key_indicators[0] if key_indicators else 'suspicious'}\"",
+                "metadata.collected_timestamp.seconds > 86400",
+                "principal.user.userid != \"\" GROUP BY principal.hostname",
+                "metadata.threat.verdict = \"SUSPICIOUS\" OR metadata.threat.verdict = \"MALICIOUS\""
+            ],
+            
+            "IBM QRadar": [
+                f"SELECT sourceip, destinationip, eventname FROM events WHERE eventname ILIKE '%{key_indicators[0] if key_indicators else 'suspicious'}%'",
+                "SELECT * FROM events WHERE category = 4003 AND starttime > NOW() - INTERVAL '24 HOURS'",
+                "GROUP BY sourceip ORDER BY eventcount DESC",
+                "WHERE magnitude > 5",
+                "LEFT JOIN reference_data.threat_intel ON events.sourceip = threat_intel.ip"
+            ],
+            
+            "Elastic (ELK)": [
+                f"""{{
+  "query": {{
+    "bool": {{
+      "must": [
+        {{"match": {{"process.name": "{key_indicators[0] if key_indicators else 'suspicious'}"}}}},
+        {{"range": {{"@timestamp": {{"gte": "now-24h"}}}}}}
+      ]
+    }}
+  }},
+  "aggs": {{
+    "hosts": {{"terms": {{"field": "host.name"}}}}
+  }}
+}}""",
+                f"""{{
+  "query": {{
+    "wildcard": {{
+      "process.command_line": "*{key_indicators[0] if key_indicators else 'suspicious'}*"
+    }}
+  }}
+}}""",
+                """{"query": {"terms": {"event.code": ["4688", "4689"]}}}""",
+                """{"sort": [{"@timestamp": {"order": "desc"}}], "size": 100}"""
+            ],
+            
+            "Generic SIEM": [
+                f"Search for process execution events containing: {key_indicators[0] if key_indicators else 'suspicious_activity'}",
+                "Filter events from last 24 hours",
+                "Group by hostname and count occurrences",
+                "Look for unusual patterns or high frequency events",
+                "Cross-reference with threat intelligence feeds"
+            ]
+        }
+        
+        return {"l1_commands": commands.get(platform, commands["Generic SIEM"])[:3], 
+                "l2_commands": commands.get(platform, commands["Generic SIEM"])[3:]}
+
+    def generate_edr_commands(self, rule_description: str, mitre_techniques: List[TechniqueResult]) -> Dict[str, List[str]]:
+        """Generate EDR-specific investigation commands"""
+        
+        # Determine investigation focus based on MITRE techniques
+        investigation_focus = "process"
+        if mitre_techniques:
+            top_technique = mitre_techniques[0]
+            if any(keyword in top_technique.name.lower() for keyword in ["network", "connection"]):
+                investigation_focus = "network"
+            elif any(keyword in top_technique.name.lower() for keyword in ["registry", "persistence"]):
+                investigation_focus = "registry"
+            elif any(keyword in top_technique.name.lower() for keyword in ["file", "creation"]):
+                investigation_focus = "file"
+        
+        edr_commands = {
+            "CrowdStrike Falcon": {
+                "process": [
+                    "event_platform=Win event_simpleName=ProcessRollup2 ImageFileName=\"*powershell.exe\"",
+                    "event_platform=Win event_simpleName=ProcessRollup2 | stats count by ComputerName, UserName",
+                    "aid=\"<device_aid>\" | search ProcessRollup2 | head 100"
+                ],
+                "network": [
+                    "event_platform=Win event_simpleName=NetworkConnectIP4 | search RemoteAddressIP4=*",
+                    "event_simpleName=DnsRequest DomainName=\"*suspicious*\"",
+                    "NetworkConnectIP4 RemotePort=4444 OR RemotePort=4445"
+                ],
+                "registry": [
+                    "event_platform=Win event_simpleName=RegGenericValue | search RegValueName=\"*Run*\"",
+                    "RegGenericValue RegObjectName=\"*CurrentVersion\\Run*\"",
+                    "RegGenericValue | stats count by RegObjectName"
+                ],
+                "file": [
+                    "event_platform=Win event_simpleName=NewExecutableWritten | search FileName=\"*.exe\"",
+                    "NewExecutableWritten | search FilePath=\"*temp*\" OR FilePath=\"*tmp*\"",
+                    "FileOpenInfo FileName=\"*.bat\" OR FileName=\"*.cmd\""
+                ]
+            },
+            
+            "Microsoft Defender": {
+                "process": [
+                    "DeviceProcessEvents | where ProcessCommandLine contains \"powershell\"",
+                    "DeviceProcessEvents | where InitiatingProcessFileName =~ \"cmd.exe\"",
+                    "DeviceProcessEvents | summarize count() by DeviceName, AccountName"
+                ],
+                "network": [
+                    "DeviceNetworkEvents | where RemotePort in (4444, 4445)",
+                    "DeviceNetworkEvents | where ActionType == \"ConnectionSuccess\"",
+                    "DeviceNetworkEvents | summarize count() by RemoteIP, DeviceName"
+                ],
+                "registry": [
+                    "DeviceRegistryEvents | where RegistryKey contains \"Run\"",
+                    "DeviceRegistryEvents | where ActionType == \"RegistryValueSet\"",
+                    "DeviceRegistryEvents | where RegistryKey contains \"CurrentVersion\\\\Run\""
+                ],
+                "file": [
+                    "DeviceFileEvents | where FileName endswith \".exe\"",
+                    "DeviceFileEvents | where FolderPath contains \"temp\"",
+                    "DeviceFileEvents | where ActionType == \"FileCreated\""
+                ]
+            },
+            
+            "SentinelOne": {
+                "process": [
+                    "ObjectType = \"Process\" AND SrcProcCmdLine CONTAINS \"powershell\"",
+                    "EventType = \"Process Creation\" AND SrcProcName = \"cmd.exe\"",
+                    "ObjectType = \"Process\" | group SrcProcName, EndpointName"
+                ],
+                "network": [
+                    "ObjectType = \"IP\" AND DstPort IN (4444, 4445)",
+                    "EventType = \"Net Conn Status\" AND NetConnStatus = \"SUCCESS\"",
+                    "ObjectType = \"IP\" | group DstIP, EndpointName"
+                ],
+                "registry": [
+                    "ObjectType = \"Registry\" AND RegistryPath CONTAINS \"Run\"",
+                    "EventType = \"Registry Value Create\" OR EventType = \"Registry Value Modify\"",
+                    "RegistryPath CONTAINS \"CurrentVersion\\Run\""
+                ],
+                "file": [
+                    "ObjectType = \"File\" AND TgtFileName ENDS_WITH \".exe\"",
+                    "EventType = \"File Creation\" AND TgtFilePath CONTAINS \"temp\"",
+                    "ObjectType = \"File\" AND TgtFileName ENDS_WITH \".bat\""
+                ]
+            },
+            
+            "Carbon Black": {
+                "process": [
+                    "process_name:powershell.exe AND cmdline:*EncodedCommand*",
+                    "parent_name:cmd.exe AND process_name:*.exe",
+                    "process_name:powershell.exe | group_by hostname, username"
+                ],
+                "network": [
+                    "netconn_count:[1 TO *] AND (remote_port:4444 OR remote_port:4445)",
+                    "domain:*suspicious* AND netconn_count:[1 TO *]",
+                    "ipaddr:* AND netconn_count:[10 TO *]"
+                ],
+                "registry": [
+                    "regmod_count:[1 TO *] AND regmod:*Run*",
+                    "regmod:*CurrentVersion\\Run* AND regmod_count:[1 TO *]",
+                    "regmod_count:[1 TO *] | group_by regmod"
+                ],
+                "file": [
+                    "filemod_count:[1 TO *] AND filemod:*.exe",
+                    "filemod:*temp*.exe OR filemod:*tmp*.exe",
+                    "filemod_count:[1 TO *] AND (filemod:*.bat OR filemod:*.cmd)"
+                ]
+            }
+        }
+        
+        # Return commands for all major EDR platforms
+        return {
+            "crowdstrike": edr_commands["CrowdStrike Falcon"][investigation_focus],
+            "defender": edr_commands["Microsoft Defender"][investigation_focus],
+            "sentinelone": edr_commands["SentinelOne"][investigation_focus],
+            "carbon_black": edr_commands["Carbon Black"][investigation_focus]
+        }
 
     def recommend_probable_techniques(self, rule_description: str, k: int = 11) -> List[Dict]:
         """Step 5: Recommend probable MITRE ATT&CK techniques"""
@@ -228,58 +445,96 @@ REASONING: [your detailed reasoning for the score]"""
         relevant_techniques.sort(key=lambda x: x.confidence, reverse=True)
         return relevant_techniques
 
+    def identify_data_source(self, rule_description: str) -> str:
+        """Step 4: Identify MITRE ATT&CK data source"""
+        data_sources = {
+            "process": "Command: Command Execution",
+            "registry": "Windows Registry: Windows Registry Key Modification",
+            "file": "File: File Creation",
+            "network": "Network Traffic: Network Traffic Flow",
+            "endpoint": "Process: Process Creation",
+            "authentication": "Logon Session: Logon Session Creation",
+            "service": "Service: Service Creation"
+        }
+        
+        rule_lower = rule_description.lower()
+        for keyword, data_source in data_sources.items():
+            if keyword in rule_lower:
+                return data_source
+        
+        return "Process: Process Creation"
+
     # Incident Response Methods
-    def generate_incident_response_plan(self, rule_description: str, mitre_techniques: List[TechniqueResult]) -> Dict[str, Any]:
-        """Generate comprehensive incident response plan"""
+    def generate_incident_response_plan(self, rule_description: str, mitre_techniques: List[TechniqueResult], siem_rule: str) -> Dict[str, Any]:
+        """Generate comprehensive incident response plan with SIEM and EDR specific steps"""
+        
+        # Identify SIEM platform
+        siem_platform = self.identify_siem_platform(siem_rule)
+        
+        # Get SIEM-specific commands
+        siem_commands = self.generate_siem_specific_commands(siem_platform, rule_description, mitre_techniques)
+        
+        # Get EDR commands
+        edr_commands = self.generate_edr_commands(rule_description, mitre_techniques)
+        
         techniques_summary = "\n".join([
             f"- {t.id}: {t.name} (Confidence: {t.confidence:.2f})"
             for t in mitre_techniques[:5]
         ])
         
-        prompt = f"""You are a senior incident response analyst creating a comprehensive investigation plan.
+        prompt = f"""You are a senior SOC analyst creating platform-specific investigation procedures.
 
-Based on the SIEM rule and identified MITRE ATT&CK techniques, create a detailed incident response plan with specific investigation steps and team recommendations.
+SIEM Platform Detected: {siem_platform}
+Rule Description: {rule_description}
+MITRE ATT&CK Techniques: {techniques_summary}
 
-SIEM Rule Description:
-{rule_description}
+Create detailed investigation steps using the detected SIEM platform ({siem_platform}) and EDR tools.
 
-Identified MITRE ATT&CK Techniques:
-{techniques_summary}
+For L1 Investigation Steps:
+- Use initial triage with {siem_platform} queries
+- Include basic EDR hunting steps
+- Provide clear escalation criteria
+- Focus on rapid assessment (15-30 minutes)
 
-Create a structured incident response plan with:
+For L2 Investigation Steps:
+- Deep analysis using advanced {siem_platform} features
+- Comprehensive EDR investigation
+- Threat hunting and correlation
+- Timeline analysis and attribution
 
-1. SOC L1 Investigation Steps (initial triage and basic analysis)
-2. SOC L2 Investigation Steps (deep analysis and threat hunting)
-3. Resolver Team Recommendations (specific actions for different teams)
+For Resolver Team Recommendations:
+- Specific containment actions
+- Platform-specific response procedures
+- Clear timelines and priorities
 
-For each step, include:
-- Clear action items
-- Specific commands or tools to use
-- Expected outcomes
-- Escalation criteria
-
-Format your response as a JSON object with this structure:
+Format as JSON:
 {{
+  "siem_platform": "{siem_platform}",
   "l1_steps": [
     {{
-      "step": "Step description",
-      "commands": ["command1", "command2"],
+      "step": "Step description with {siem_platform} focus",
+      "siem_commands": ["specific {siem_platform} query"],
+      "edr_commands": ["EDR investigation command"],
       "expected_outcome": "What L1 should find",
-      "escalation_criteria": "When to escalate to L2"
+      "escalation_criteria": "When to escalate to L2",
+      "timeline": "Expected time to complete"
     }}
   ],
   "l2_steps": [
     {{
-      "step": "Deep analysis step",
-      "commands": ["advanced command1", "advanced command2"],
+      "step": "Advanced analysis step",
+      "siem_commands": ["advanced {siem_platform} query"],
+      "edr_commands": ["deep EDR analysis"],
       "expected_outcome": "What L2 should discover",
-      "escalation_criteria": "When to escalate to resolver teams"
+      "escalation_criteria": "When to escalate to resolver teams",
+      "timeline": "Expected time to complete"
     }}
   ],
   "resolver_recommendations": [
     {{
-      "team": "Team name (e.g., Firewall Team, Identity Team)",
-      "action": "Specific action to take",
+      "team": "Team name",
+      "action": "Specific action with platform details",
+      "platform_specific": "Platform-specific implementation",
       "priority": "High/Medium/Low",
       "timeline": "Expected completion time"
     }}
@@ -289,10 +544,31 @@ Format your response as a JSON object with this structure:
 Return only the JSON object:"""
         
         try:
-            response_text = self._call_claude(prompt, max_tokens=3072, temperature=0.2)
+            response_text = self._call_claude(prompt, max_tokens=4096, temperature=0.2)
             json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
             if json_match:
-                return json.loads(json_match.group())
+                generated_plan = json.loads(json_match.group())
+                
+                # Enhance with real platform-specific commands
+                if generated_plan.get('l1_steps'):
+                    for i, step in enumerate(generated_plan['l1_steps']):
+                        if i < len(siem_commands['l1_commands']):
+                            step['siem_commands'] = [siem_commands['l1_commands'][i]]
+                        # Add EDR commands from different platforms
+                        step['edr_commands'] = {
+                            "CrowdStrike": edr_commands.get('crowdstrike', ["No specific command"])[0] if edr_commands.get('crowdstrike') else "No specific command",
+                            "Microsoft Defender": edr_commands.get('defender', ["No specific command"])[0] if edr_commands.get('defender') else "No specific command",
+                            "SentinelOne": edr_commands.get('sentinelone', ["No specific command"])[0] if edr_commands.get('sentinelone') else "No specific command"
+                        }
+                
+                if generated_plan.get('l2_steps'):
+                    for i, step in enumerate(generated_plan['l2_steps']):
+                        if i < len(siem_commands['l2_commands']):
+                            step['siem_commands'] = [siem_commands['l2_commands'][i]]
+                        # Add all EDR platform commands for L2
+                        step['edr_commands'] = edr_commands
+                
+                return generated_plan
             return {}
         except Exception as e:
             st.error(f"Error generating incident response plan: {str(e)}")
@@ -380,8 +656,8 @@ Return only the JSON array:"""
             probable_techniques = self.recommend_probable_techniques(rule_description)
             relevant_techniques = self.extract_relevant_techniques(rule_description, probable_techniques, confidence_threshold)
             
-            # Incident response plan
-            incident_plan = self.generate_incident_response_plan(rule_description, relevant_techniques)
+            # Incident response plan (now with SIEM platform detection)
+            incident_plan = self.generate_incident_response_plan(rule_description, relevant_techniques, siem_rule)
             
             # SOAR workflow
             soar_workflow = self.generate_soar_workflow(rule_description, relevant_techniques)
@@ -393,7 +669,8 @@ Return only the JSON array:"""
                 'data_source': data_source,
                 'relevant_techniques': relevant_techniques,
                 'incident_plan': incident_plan,
-                'soar_workflow': soar_workflow
+                'soar_workflow': soar_workflow,
+                'siem_platform': incident_plan.get('siem_platform', 'Unknown')
             }
             
             return results
