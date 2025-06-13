@@ -1,17 +1,18 @@
 """
-Cybersecurity Response Platform
-Main Streamlit Application
+Cybersecurity Response Platform - Enhanced Version
+Main Streamlit Application with Separate Pages
 
 A comprehensive platform for SIEM rule analysis, incident response planning,
 and SOAR workflow automation using Claude 3.5 Haiku.
 """
 import streamlit as st
 from cybersecurity_platform import CybersecurityResponsePlatform
-from display_functions import (
+from enhanced_display_functions import (
     display_mitre_mapping, 
     display_incident_response_plan, 
     display_soar_workflow,
-    display_tab_previews
+    display_home_page,
+    display_rule_analysis_page
 )
 
 # Configure page
@@ -23,11 +24,21 @@ st.set_page_config(
 )
 
 def main():
-    st.title("🛡️ Cybersecurity Response Platform")
-    st.markdown("**Comprehensive SIEM analysis, incident response planning, and SOAR workflow automation**")
-    
-    # Sidebar configuration
+    # Sidebar navigation
     with st.sidebar:
+        st.title("🛡️ Cyber Platform")
+        st.markdown("---")
+        
+        # Navigation
+        page = st.selectbox(
+            "📍 Navigate to:",
+            ["🏠 Home", "📝 Rule Analysis", "🎯 MITRE Mapping", "📋 Incident Response", "🔄 SOAR Workflow"],
+            index=0
+        )
+        
+        st.markdown("---")
+        
+        # Configuration section
         st.header("⚙️ Configuration")
         
         # API Key setup
@@ -35,7 +46,7 @@ def main():
         
         if default_api_key:
             api_key = default_api_key
-            st.success("✅ API Key loaded from secrets")
+            st.success("✅ API Key loaded")
         else:
             api_key = st.text_input(
                 "Claude API Key", 
@@ -44,9 +55,8 @@ def main():
                 help="Get your API key from https://console.anthropic.com/"
             )
             
-            if not api_key:
-                st.warning("Please enter your Claude API key to continue")
-                st.info("💡 **Tip**: Configure the API key in Streamlit Cloud secrets")
+            if not api_key and page not in ["🏠 Home"]:
+                st.warning("Please enter your Claude API key")
                 st.stop()
         
         # Model selection
@@ -75,197 +85,75 @@ def main():
         )
         
         st.markdown("---")
-        st.header("📋 Platform Modules")
-        st.markdown("""
-        **🎯 MITRE Mapping**
-        - SIEM rule analysis
-        - ATT&CK technique identification
         
-        **📋 Incident Response**
-        - L1/L2 investigation steps
-        - Team-specific recommendations
-        
-        **🔄 SOAR Workflow**
-        - End-to-end automation
-        - Decision points & integrations
-        """)
-        
-        # Model-specific tips
-        if "haiku" in selected_model.lower():
-            st.success("🚀 **Claude Haiku**: Lightning fast & cost-effective!")
-        elif "sonnet" in selected_model.lower() and "3.5" in selected_model:
-            st.info("⚡ **Claude 3.5 Sonnet**: Premium performance")
-        else:
-            st.warning("📝 **Claude 3**: Reliable baseline models")
-
-    # Shared SIEM rule input
-    st.header("📝 SIEM Rule Input")
-    
-    example_rules = {
-        "Splunk - Suspicious PowerShell": """index=main sourcetype="WinEventLog:Security" EventCode=4688 | search process_name="*powershell.exe*" command_line="*-EncodedCommand*" | stats count by host, user, process_name, command_line""",
-        
-        "Splunk - Registry Persistence": """index=main sourcetype="WinEventLog:System" | search registry_path="*\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\*" | stats count by host, registry_path, registry_value""",
-        
-        "Microsoft Sentinel - Suspicious Login": """SecurityEvent | where EventID == 4624 | where LogonType == 10 | summarize count() by Account, IpAddress | where count_ > 10""",
-        
-        "Microsoft Sentinel - Process Creation": """DeviceProcessEvents | where ProcessCommandLine contains "powershell" and ProcessCommandLine contains "-EncodedCommand" | summarize count() by DeviceName, AccountName""",
-        
-        "Elastic (ELK) - Network Connection": """{"query": {"bool": {"must": [{"term": {"event_type": "network"}}, {"range": {"destination_port": {"gte": 4444, "lte": 4445}}}]}}}""",
-        
-        "Elastic (ELK) - Suspicious Process": """{"query": {"bool": {"must": [{"wildcard": {"process.name": "*powershell*"}}, {"match": {"process.args": "EncodedCommand"}}]}}}""",
-        
-        "Google Chronicle - Domain Resolution": """metadata.event_type = "NETWORK_DNS" AND network.dns.questions.name = /.*suspicious-domain\\.com.*/ AND metadata.collected_timestamp.seconds > 86400""",
-        
-        "IBM QRadar - Failed Logins": """SELECT sourceip, username, eventname FROM events WHERE eventname = 'Failed Login' AND starttime > NOW() - INTERVAL '24 HOURS' GROUP BY sourceip HAVING COUNT(*) > 10""",
-        
-        "Sumo Logic - File Creation": """_source="windows-security" | parse "TargetFilename=*" as filename | where filename matches "*temp*.exe" | timeslice 1h | count by _timeslice, filename"""
-    }
-    
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        selected_example = st.selectbox("Choose example or enter custom:", ["Custom"] + list(example_rules.keys()))
-        
-        if selected_example != "Custom":
-            siem_rule = st.text_area(
-                "SIEM Rule:", 
-                value=example_rules[selected_example],
-                height=120,
-                help="SIEM rule in any format (Splunk SPL, Elasticsearch, KQL, etc.)"
-            )
-        else:
-            siem_rule = st.text_area(
-                "SIEM Rule:", 
-                height=120,
-                placeholder="Enter your SIEM rule here...",
-                help="SIEM rule in any format (Splunk SPL, Elasticsearch, KQL, etc.)"
-            )
-    
-    with col2:
-        st.markdown("**Quick Actions:**")
-        analyze_button = st.button("🔍 Analyze Rule", type="primary", use_container_width=True)
-        
-        if st.button("🔄 Clear Results", use_container_width=True):
-            if 'analysis_results' in st.session_state:
-                del st.session_state['analysis_results']
-            st.rerun()
-        
-        st.markdown("**Analysis Status:**")
+        # Status section
+        st.header("📊 Status")
         if 'analysis_results' in st.session_state:
             st.success("✅ Analysis Complete")
             st.info(f"🤖 Model: {selected_model_display}")
+            
+            # Quick stats
+            if st.session_state['analysis_results'].get('relevant_techniques'):
+                techniques_count = len(st.session_state['analysis_results']['relevant_techniques'])
+                st.metric("Techniques Found", techniques_count)
         else:
             st.info("⏳ Ready for Analysis")
+        
+        st.markdown("---")
+        
+        # Quick actions
+        if 'analysis_results' in st.session_state:
+            if st.button("🔄 Clear Results", use_container_width=True):
+                del st.session_state['analysis_results']
+                st.rerun()
+        
+        # Platform info
+        st.markdown("---")
+        st.header("📋 Modules")
+        st.markdown("""
+        **🎯 MITRE Mapping**
+        - SIEM rule analysis
+        - ATT&CK technique ID
+        
+        **📋 Incident Response**
+        - Template-based procedures
+        - L1/L2 investigation steps
+        
+        **🔄 SOAR Workflow**
+        - Visual workflow diagram
+        - End-to-end automation
+        """)
 
-    # Process analysis
-    if analyze_button and siem_rule.strip():
-        with st.spinner("🔍 Analyzing SIEM rule..."):
-            platform = CybersecurityResponsePlatform(api_key, selected_model)
-            
-            # Progress tracking
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            try:
-                status_text.text("Step 1/3: Extracting IoCs and mapping to MITRE ATT&CK...")
-                progress_bar.progress(33)
-                
-                # Run complete analysis
-                results = platform.run_complete_analysis(siem_rule, confidence_threshold)
-                
-                progress_bar.progress(66)
-                status_text.text("Step 2/3: Generating incident response plan...")
-                
-                # Small delay for UI feedback
-                import time
-                time.sleep(0.5)
-                
-                progress_bar.progress(100)
-                status_text.text("Step 3/3: Creating SOAR workflow...")
-                
-                time.sleep(0.5)
-                
-                if results:
-                    # Store results in session state
-                    st.session_state['analysis_results'] = results
-                    status_text.text("✅ Analysis complete!")
-                    st.success("🎉 Analysis completed successfully! Check the tabs below for results.")
-                else:
-                    status_text.text("❌ Analysis failed")
-                    st.error("Analysis failed. Please check your input and try again.")
-                
-            except Exception as e:
-                status_text.text(f"❌ Error: {str(e)}")
-                st.error(f"Analysis failed: {str(e)}")
-
-    st.markdown("---")
-
-    # Main content with tabs - ALWAYS VISIBLE
-    tab1, tab2, tab3 = st.tabs(["🎯 MITRE Mapping", "📋 Incident Response Plan", "🔄 SOAR Workflow"])
-    
-    # Get preview functions
-    show_incident_response_preview, show_soar_workflow_preview = display_tab_previews()
-    
-    # Tab 1: MITRE Mapping
-    with tab1:
+    # Main content area - render based on selected page
+    if page == "🏠 Home":
+        display_home_page()
+        
+    elif page == "📝 Rule Analysis":
+        display_rule_analysis_page(api_key, selected_model, confidence_threshold)
+        
+    elif page == "🎯 MITRE Mapping":
         if 'analysis_results' in st.session_state:
             display_mitre_mapping(st.session_state['analysis_results'])
         else:
             st.header("🎯 MITRE ATT&CK Mapping")
-            st.info("👆 **Enter a SIEM rule above and click 'Analyze Rule' to see MITRE ATT&CK technique mappings**")
+            st.info("👈 **Go to 'Rule Analysis' to analyze a SIEM rule first**")
+            display_mitre_preview()
             
-            st.subheader("📋 What You'll Get:")
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("""
-                **🔍 Rule Analysis:**
-                - IoC extraction from SIEM rules
-                - Natural language translation
-                - Data source identification
-                
-                **🎯 MITRE Mapping:**
-                - Relevant ATT&CK techniques
-                - Confidence scoring (0.0-1.0)
-                - Detailed reasoning for each match
-                """)
-            
-            with col2:
-                st.markdown("""
-                **📊 Results Include:**
-                - Technique IDs (e.g., T1055, T1003.001)
-                - Technique names and descriptions
-                - Attack behavior explanations
-                
-                **🔗 Contextual Information:**
-                - Web-based IoC enrichment
-                - Threat intelligence context
-                - Attack pattern insights
-                """)
-            
-            # Example results preview
-            with st.expander("🔍 Example MITRE Mapping Result", expanded=False):
-                st.markdown("""
-                **T1059.001 - PowerShell** (Confidence: 0.92)
-                
-                **Description:** Adversaries may abuse PowerShell commands and scripts for execution.
-                
-                **Reasoning:** The SIEM rule specifically looks for PowerShell processes with encoded commands (`-EncodedCommand`), which is a common technique used by attackers to obfuscate malicious PowerShell scripts.
-                """)
-    
-    # Tab 2: Incident Response Plan
-    with tab2:
+    elif page == "📋 Incident Response":
         if 'analysis_results' in st.session_state:
             display_incident_response_plan(st.session_state['analysis_results'])
         else:
-            show_incident_response_preview()
-    
-    # Tab 3: SOAR Workflow
-    with tab3:
+            st.header("📋 Incident Response Plan")
+            st.info("👈 **Go to 'Rule Analysis' to analyze a SIEM rule first**")
+            display_incident_response_preview()
+            
+    elif page == "🔄 SOAR Workflow":
         if 'analysis_results' in st.session_state:
             display_soar_workflow(st.session_state['analysis_results'])
         else:
-            show_soar_workflow_preview()
+            st.header("🔄 SOAR Workflow")
+            st.info("👈 **Go to 'Rule Analysis' to analyze a SIEM rule first**")
+            display_soar_preview()
 
     # Footer
     st.markdown("---")
@@ -273,10 +161,108 @@ def main():
     <div style='text-align: center'>
         <p>Built with ❤️ using Streamlit and Claude API</p>
         <p><a href='https://github.com/your-username/cybersecurity-response-platform'>📚 View on GitHub</a> | 
-        <a href='https://arxiv.org/html/2502.02337v1'>📄 Original Paper</a> |
         <a href='https://console.anthropic.com/'>🔑 Get Claude API Key</a></p>
     </div>
     """, unsafe_allow_html=True)
+
+def display_mitre_preview():
+    """Preview content for MITRE mapping page"""
+    st.subheader("📋 What You'll Get:")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("""
+        **🔍 Rule Analysis:**
+        - IoC extraction from SIEM rules
+        - Natural language translation
+        - Data source identification
+        
+        **🎯 MITRE Mapping:**
+        - Relevant ATT&CK techniques
+        - Confidence scoring (0.0-1.0)
+        - Detailed reasoning for each match
+        """)
+    
+    with col2:
+        st.markdown("""
+        **📊 Results Include:**
+        - Technique IDs (e.g., T1055, T1003.001)
+        - Technique names and descriptions
+        - Attack behavior explanations
+        
+        **🔗 Contextual Information:**
+        - Web-based IoC enrichment
+        - Threat intelligence context
+        - Attack pattern insights
+        """)
+
+def display_incident_response_preview():
+    """Preview content for incident response page"""
+    st.subheader("🔍 Template-Based Investigation:")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("""
+        **📋 Structured Approach:**
+        - ✅ Historical check procedures
+        - ✅ Duplicate incident verification
+        - ✅ Systematic event investigation
+        - ✅ Clear recommendations
+        
+        **🛡️ Platform Support:**
+        - 🟠 **Splunk** - SPL queries
+        - 🔵 **Microsoft Sentinel** - KQL queries
+        - 🟢 **Elastic (ELK)** - JSON DSL
+        - 🔴 **IBM QRadar** - SQL queries
+        """)
+    
+    with col2:
+        st.markdown("""
+        **⚡ Investigation Levels:**
+        - 🔍 **Step 1** - Historical analysis
+        - 🔍 **Step 2** - Duplicate check
+        - 🔍 **Step 3** - Event investigation
+        - 🔍 **Step 4** - Recommendations
+        
+        **🎯 Team Integration:**
+        - 👥 SOC L1/L2 procedures
+        - 🛠️ Platform-specific commands
+        - 📈 Clear escalation criteria
+        """)
+
+def display_soar_preview():
+    """Preview content for SOAR workflow page"""
+    st.subheader("🔄 Visual Workflow Automation:")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("""
+        **🎨 Interactive Diagram:**
+        - ✅ Visual workflow representation
+        - ✅ Drag-and-drop interface
+        - ✅ Real-time step updates
+        - ✅ Decision point highlighting
+        
+        **🤖 Automation Steps:**
+        - Alert ingestion & enrichment
+        - Threat intelligence lookup
+        - Automated containment
+        - ServiceNow integration
+        """)
+    
+    with col2:
+        st.markdown("""
+        **👤 Manual Interventions:**
+        - L1 analyst review points
+        - False positive determination
+        - Evidence collection
+        - Final case closure
+        
+        **📤 Export Options:**
+        - 📊 JSON workflow export
+        - 📋 Task checklist format
+        - 🎫 ServiceNow templates
+        """)
 
 if __name__ == "__main__":
     main()
