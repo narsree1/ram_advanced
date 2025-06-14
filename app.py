@@ -8,6 +8,7 @@ import json
 import requests
 import time
 import re
+import graphviz
 from typing import Dict, List, Any
 from dataclasses import dataclass
 
@@ -445,103 +446,125 @@ Return only the JSON object with detailed, actionable steps:"""
             st.error(f"Error generating incident response plan: {str(e)}")
             return {}
 
-    def generate_soar_workflow(self, rule_description: str, mitre_techniques: List[TechniqueResult]) -> List[SOARWorkflowStep]:
-        """Generate visual SOAR workflow"""
+    def generate_soar_workflow(self, rule_description: str, mitre_techniques: List[TechniqueResult]) -> Dict[str, Any]:
+        """Generate visual SOAR workflow with Graphviz diagram using Claude Haiku"""
         techniques_summary = "\n".join([
             f"- {t.id}: {t.name}"
             for t in mitre_techniques[:3]
         ])
         
+        # Use Claude Haiku specifically for SOAR workflow generation
+        haiku_model = "claude-3-5-haiku-20241022"
+        
         prompt = f"""You are a SOAR architect designing a visual workflow from alert to resolution.
 
-Create a comprehensive SOAR workflow with clear visual steps that can be displayed as a top-down graph.
+Create a comprehensive SOAR workflow with clear visual steps that can be displayed as a Graphviz diagram.
 
 RULE DESCRIPTION: {rule_description}
 KEY TECHNIQUES: {techniques_summary}
 
-Return as JSON array with these specific workflow steps:
-[
-  {{
-    "step_id": "START",
-    "name": "Alert Triggered", 
-    "type": "automated",
-    "description": "SIEM rule triggered and alert generated",
-    "responsible_team": "SIEM Platform",
-    "inputs": ["raw_log_data"],
-    "outputs": ["structured_alert"],
-    "next_steps": ["ENRICH"]
-  }},
-  {{
-    "step_id": "ENRICH",
-    "name": "Alert Enrichment",
-    "type": "automated", 
-    "description": "Gather additional context from threat intelligence and asset databases",
-    "responsible_team": "SOAR Platform",
-    "inputs": ["structured_alert"],
-    "outputs": ["enriched_alert"],
-    "next_steps": ["TRIAGE"]
-  }},
-  {{
-    "step_id": "TRIAGE",
-    "name": "Initial Triage",
-    "type": "manual",
-    "description": "L1 analyst reviews alert and determines severity",
-    "responsible_team": "L1 SOC Analyst", 
-    "inputs": ["enriched_alert"],
-    "outputs": ["triage_decision"],
-    "next_steps": ["INVESTIGATE"]
-  }},
-  {{
-    "step_id": "INVESTIGATE",
-    "name": "Deep Investigation",
-    "type": "manual",
-    "description": "L2 analyst performs detailed investigation using SIEM and EDR",
-    "responsible_team": "L2 SOC Analyst",
-    "inputs": ["triage_decision"],
-    "outputs": ["investigation_results"],
-    "next_steps": ["CONTAIN"]
-  }},
-  {{
-    "step_id": "CONTAIN",
-    "name": "Containment Actions",
-    "type": "decision",
-    "description": "Determine if containment is needed based on investigation",
-    "responsible_team": "SOC Manager",
-    "inputs": ["investigation_results"],
-    "outputs": ["containment_decision"],
-    "next_steps": ["RESOLVE"]
-  }},
-  {{
-    "step_id": "RESOLVE",
-    "name": "Resolution & Documentation",
-    "type": "manual",
-    "description": "Complete remediation and document lessons learned",
-    "responsible_team": "Security Team",
-    "inputs": ["containment_decision"],
-    "outputs": ["incident_report"],
-    "next_steps": ["CLOSE"]
-  }},
-  {{
-    "step_id": "CLOSE",
-    "name": "Case Closure",
-    "type": "automated",
-    "description": "Close ticket in ITSM and update metrics",
-    "responsible_team": "SOAR Platform",
-    "inputs": ["incident_report"],
-    "outputs": ["closed_case"],
-    "next_steps": []
-  }}
-]
+Return as JSON object with workflow steps and graphviz DOT notation:
+{{
+  "workflow_steps": [
+    {{
+      "step_id": "START",
+      "name": "Alert Triggered", 
+      "type": "automated",
+      "description": "SIEM rule triggered and alert generated",
+      "responsible_team": "SIEM Platform",
+      "inputs": ["raw_log_data"],
+      "outputs": ["structured_alert"],
+      "next_steps": ["ENRICH"]
+    }},
+    {{
+      "step_id": "ENRICH",
+      "name": "Alert Enrichment",
+      "type": "automated", 
+      "description": "Gather additional context from threat intelligence and asset databases",
+      "responsible_team": "SOAR Platform",
+      "inputs": ["structured_alert"],
+      "outputs": ["enriched_alert"],
+      "next_steps": ["TRIAGE"]
+    }},
+    {{
+      "step_id": "TRIAGE",
+      "name": "Initial Triage",
+      "type": "manual",
+      "description": "L1 analyst reviews alert and determines severity",
+      "responsible_team": "L1 SOC Analyst", 
+      "inputs": ["enriched_alert"],
+      "outputs": ["triage_decision"],
+      "next_steps": ["INVESTIGATE"]
+    }},
+    {{
+      "step_id": "INVESTIGATE",
+      "name": "Deep Investigation",
+      "type": "manual",
+      "description": "L2 analyst performs detailed investigation using SIEM and EDR",
+      "responsible_team": "L2 SOC Analyst",
+      "inputs": ["triage_decision"],
+      "outputs": ["investigation_results"],
+      "next_steps": ["CONTAIN"]
+    }},
+    {{
+      "step_id": "CONTAIN",
+      "name": "Containment Decision",
+      "type": "decision",
+      "description": "Determine if containment is needed based on investigation",
+      "responsible_team": "SOC Manager",
+      "inputs": ["investigation_results"],
+      "outputs": ["containment_decision"],
+      "next_steps": ["RESOLVE"]
+    }},
+    {{
+      "step_id": "RESOLVE",
+      "name": "Resolution & Remediation",
+      "type": "manual",
+      "description": "Complete remediation and document lessons learned",
+      "responsible_team": "Security Team",
+      "inputs": ["containment_decision"],
+      "outputs": ["incident_report"],
+      "next_steps": ["CLOSE"]
+    }},
+    {{
+      "step_id": "CLOSE",
+      "name": "Case Closure",
+      "type": "automated",
+      "description": "Close ticket in ITSM and update metrics",
+      "responsible_team": "SOAR Platform",
+      "inputs": ["incident_report"],
+      "outputs": ["closed_case"],
+      "next_steps": []
+    }}
+  ],
+  "graphviz_dot": "digraph SOAR {{\\n  rankdir=TD;\\n  node [shape=box, style=filled];\\n  \\n  START [label=\\"Alert Triggered\\\\n(Automated)\\", fillcolor=lightblue];\\n  ENRICH [label=\\"Alert Enrichment\\\\n(Automated)\\", fillcolor=lightblue];\\n  TRIAGE [label=\\"Initial Triage\\\\n(Manual)\\", fillcolor=lightgreen];\\n  INVESTIGATE [label=\\"Deep Investigation\\\\n(Manual)\\", fillcolor=lightgreen];\\n  CONTAIN [label=\\"Containment Decision\\\\n(Decision)\\", fillcolor=yellow];\\n  RESOLVE [label=\\"Resolution\\\\n(Manual)\\", fillcolor=lightgreen];\\n  CLOSE [label=\\"Case Closure\\\\n(Automated)\\", fillcolor=lightblue];\\n  \\n  START -> ENRICH;\\n  ENRICH -> TRIAGE;\\n  TRIAGE -> INVESTIGATE;\\n  INVESTIGATE -> CONTAIN;\\n  CONTAIN -> RESOLVE;\\n  RESOLVE -> CLOSE;\\n}}"
+}}
 
-Return only the JSON array:"""
+Create a similar structure but generate the actual graphviz DOT notation for the workflow with proper colors:
+- Automated steps: lightblue
+- Manual steps: lightgreen  
+- Decision steps: yellow
+
+Return only the JSON object:"""
         
         try:
-            response_text = self._call_claude(prompt, max_tokens=4096, temperature=0.2)
-            json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
+            # Use Haiku specifically for SOAR workflow
+            response = self.client.messages.create(
+                model=haiku_model,
+                max_tokens=4096,
+                temperature=0.2,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            response_text = response.content[0].text
+            
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
             if json_match:
                 workflow_data = json.loads(json_match.group())
-                return [
-                    SOARWorkflowStep(
+                
+                # Convert workflow steps to SOARWorkflowStep objects
+                workflow_steps = []
+                for step in workflow_data.get('workflow_steps', []):
+                    workflow_steps.append(SOARWorkflowStep(
                         step_id=step.get('step_id', ''),
                         name=step.get('name', ''),
                         type=step.get('type', ''),
@@ -550,13 +573,16 @@ Return only the JSON array:"""
                         inputs=step.get('inputs', []),
                         outputs=step.get('outputs', []),
                         next_steps=step.get('next_steps', [])
-                    )
-                    for step in workflow_data
-                ]
-            return []
+                    ))
+                
+                return {
+                    'workflow_steps': workflow_steps,
+                    'graphviz_dot': workflow_data.get('graphviz_dot', '')
+                }
+            return {'workflow_steps': [], 'graphviz_dot': ''}
         except Exception as e:
             st.error(f"Error generating SOAR workflow: {str(e)}")
-            return []
+            return {'workflow_steps': [], 'graphviz_dot': ''}
 
     def run_complete_analysis(self, siem_rule: str, confidence_threshold: float = 0.7) -> Dict[str, Any]:
         """Run complete analysis pipeline"""
@@ -574,7 +600,7 @@ Return only the JSON array:"""
             incident_plan = self.generate_detailed_incident_response(rule_description, relevant_techniques, siem_rule)
             
             # SOAR workflow
-            soar_workflow = self.generate_soar_workflow(rule_description, relevant_techniques)
+            soar_data = self.generate_soar_workflow(rule_description, relevant_techniques)
             
             results = {
                 'rule_description': rule_description,
@@ -582,7 +608,8 @@ Return only the JSON array:"""
                 'context_info': context_info,
                 'relevant_techniques': relevant_techniques,
                 'incident_plan': incident_plan,
-                'soar_workflow': soar_workflow,
+                'soar_workflow': soar_data.get('workflow_steps', []),
+                'soar_graphviz': soar_data.get('graphviz_dot', ''),
                 'siem_platform': incident_plan.get('siem_platform', 'Unknown')
             }
             
@@ -902,7 +929,7 @@ def display_incident_response_page():
             """, unsafe_allow_html=True)
 
 def display_soar_workflow_page():
-    """Visual SOAR workflow page"""
+    """Visual SOAR workflow page with Graphviz diagram"""
     st.title("🔄 SOAR Workflow")
     
     if not st.session_state.get('analysis_results'):
@@ -911,6 +938,7 @@ def display_soar_workflow_page():
     
     results = st.session_state['analysis_results']
     workflow = results.get('soar_workflow', [])
+    graphviz_dot = results.get('soar_graphviz', '')
     
     if not workflow:
         st.warning("No SOAR workflow available.")
@@ -920,7 +948,7 @@ def display_soar_workflow_page():
     st.markdown("""
     <div class="main-header">
         <h2>🔄 SOAR Automation Workflow</h2>
-        <p>End-to-End Incident Response Automation</p>
+        <p>End-to-End Incident Response Automation (Generated by Claude Haiku)</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -938,25 +966,29 @@ def display_soar_workflow_page():
     with col4:
         st.metric("📋 Total Steps", len(workflow))
     
-    # Visual Workflow (Graph TD - Top Down)
+    # Graphviz Workflow Diagram
     st.markdown("### 📊 Visual Workflow Diagram")
     
-    # Create visual workflow
-    for i, step in enumerate(workflow):
-        type_emoji = {"automated": "🤖", "manual": "👤", "decision": "🤔"}.get(step.type, "📋")
-        
-        # Workflow node
-        st.markdown(f"""
-        <div class="workflow-node">
-            <h4>{type_emoji} {step.step_id}</h4>
-            <h5>{step.name}</h5>
-            <p>{step.responsible_team}</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Arrow (except for last step)
-        if i < len(workflow) - 1:
-            st.markdown('<div class="workflow-arrow">⬇️</div>', unsafe_allow_html=True)
+    if graphviz_dot:
+        try:
+            # Create and display Graphviz diagram
+            graph = graphviz.Source(graphviz_dot)
+            st.graphviz_chart(graphviz_dot)
+            
+            # Legend
+            st.markdown("""
+            **Legend:**
+            - 🔵 **Blue**: Automated steps (no human intervention)
+            - 🟢 **Green**: Manual steps (require analyst action)  
+            - 🟡 **Yellow**: Decision points (approval/escalation needed)
+            """)
+            
+        except Exception as e:
+            st.error(f"Error rendering Graphviz diagram: {str(e)}")
+            st.text("Raw DOT notation:")
+            st.code(graphviz_dot, language='dot')
+    else:
+        st.warning("No Graphviz diagram available.")
     
     # Detailed Steps
     st.markdown("### 📋 Detailed Workflow Steps")
@@ -985,7 +1017,7 @@ def display_soar_workflow_page():
     # Export Options
     st.markdown("### 📤 Export Options")
     
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     
     with col1:
         workflow_json = json.dumps([{
@@ -1008,6 +1040,17 @@ def display_soar_workflow_page():
         )
     
     with col2:
+        # Download Graphviz DOT file
+        if graphviz_dot:
+            st.download_button(
+                label="🎨 Download DOT",
+                data=graphviz_dot,
+                file_name="workflow_diagram.dot",
+                mime="text/plain",
+                use_container_width=True
+            )
+    
+    with col3:
         checklist = "# SOAR Workflow Checklist\n\n"
         for step in workflow:
             type_emoji = {"automated": "🤖", "manual": "👤", "decision": "🤔"}.get(step.type, "📋")
