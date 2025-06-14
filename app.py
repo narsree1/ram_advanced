@@ -322,7 +322,7 @@ Provide a clear, natural language explanation of what this rule detects:"""
         
         # SIEM platform detection patterns
         siem_patterns = {
-            "Splunk": ["index=", "sourcetype=", "| search", "| stats", "| eval", "| where", "| tstats"],
+            "Splunk": ["index=", "sourcetype=", "| search", "| stats", "| eval", "| where"],
             "Microsoft Sentinel": ["securityevent", "signinlogs", "auditlogs", "| where", "| summarize", "kusto"],
             "Google Chronicle": ["metadata.event_type", "principal.hostname", "target.hostname", "udm."],
             "IBM QRadar": ["select", "from events", "where", "group by", "order by", "last"],
@@ -776,42 +776,87 @@ Return only the JSON object:"""
 
 # Settings Modal
 def show_settings_modal():
-    """Display settings modal with comprehensive Claude model support"""
+    """Display settings modal with comprehensive Claude model support and API key management"""
     with st.expander("⚙️ Configuration Settings", expanded=False):
         col1, col2 = st.columns(2)
         
         with col1:
-            # API Key setup
+            st.markdown("### 🔑 API Key Configuration")
+            
+            # Check for API key in Streamlit secrets first
             default_api_key = st.secrets.get("CLAUDE_API_KEY", "")
             
             if default_api_key:
+                # API key found in secrets
                 api_key = default_api_key
-                st.success("✅ API Key loaded from secrets")
+                st.success("✅ **API Key Status:** Loaded from Streamlit secrets")
+                st.info("🔒 **Security:** Your API key is securely stored in app configuration")
+                
+                # Option to override with manual entry
+                override_key = st.checkbox("🔄 Use different API key for this session", key="override_api_key")
+                
+                if override_key:
+                    manual_api_key = st.text_input(
+                        "Enter Alternative API Key:", 
+                        type="password",
+                        placeholder="sk-ant-api03-...",
+                        help="Enter a different Claude API key for this session only",
+                        key="manual_override_key"
+                    )
+                    if manual_api_key:
+                        if validate_api_key_format(manual_api_key):
+                            api_key = manual_api_key
+                            st.success("✅ **Override Key:** Using session-specific API key")
+                        else:
+                            st.error("❌ **Invalid Format:** API key should start with 'sk-ant-api03-'")
+                
             else:
+                # No API key in secrets - require manual entry
+                st.warning("⚠️ **No API Key Found:** Please enter your Claude API key below")
+                
                 api_key = st.text_input(
-                    "Claude API Key", 
+                    "🔑 Claude API Key **(Required)**", 
                     type="password",
-                    placeholder="Enter your Claude API key...",
-                    help="Get your API key from https://console.anthropic.com/"
+                    placeholder="sk-ant-api03-...",
+                    help="Get your API key from https://console.anthropic.com/",
+                    key="manual_api_key"
                 )
+                
                 if api_key:
-                    st.success("✅ API Key configured")
+                    if validate_api_key_format(api_key):
+                        st.success("✅ **API Key:** Successfully configured")
+                        st.info("💡 **Tip:** To avoid entering the key each time, add it to your Streamlit secrets as 'CLAUDE_API_KEY'")
+                    else:
+                        st.error("❌ **Invalid Format:** Claude API keys should start with 'sk-ant-api03-'")
+                        api_key = ""  # Clear invalid key
+                else:
+                    st.error("🚫 **Required:** Please enter your Claude API key to continue")
+                    st.markdown("""
+                    **How to get your API key:**
+                    1. Go to [Claude Console](https://console.anthropic.com/)
+                    2. Sign in to your account
+                    3. Navigate to API Keys section
+                    4. Create a new API key
+                    5. Copy and paste it above
+                    """)
         
         with col2:
+            st.markdown("### 🤖 Model Configuration")
+            
             # Comprehensive model selection with all Claude versions
             model_options = {
-                # Claude 4 Models (Latest)
-                "Claude 4 Sonnet (Latest)": "claude-sonnet-4-20250514",
+                # Claude 3.5 Models (Most Compatible - Recommended Defaults)
+                "Claude 3.5 Haiku (Fast & Efficient)": "claude-3-5-haiku-20241022",
+                "Claude 3.5 Sonnet (Balanced Performance)": "claude-3-5-sonnet-20241022",
+                
+                # Claude 4 Models (Latest - May require special access)
+                "Claude 4 Sonnet (Latest Balanced)": "claude-sonnet-4-20250514",
                 "Claude 4 Opus (Most Capable)": "claude-opus-4-20250514",
                 
-                # Claude 3.5 Models
-                "Claude 3.5 Sonnet (Balanced)": "claude-3-5-sonnet-20241022",
-                "Claude 3.5 Haiku (Fast)": "claude-3-5-haiku-20241022",
-                
                 # Claude 3 Models (Legacy Support)
-                "Claude 3 Opus (Legacy)": "claude-3-opus-20240229",
-                "Claude 3 Sonnet (Legacy)": "claude-3-sonnet-20240229",
-                "Claude 3 Haiku (Legacy)": "claude-3-haiku-20240307",
+                "Claude 3 Opus (Legacy High-End)": "claude-3-opus-20240229",
+                "Claude 3 Sonnet (Legacy Balanced)": "claude-3-sonnet-20240229",
+                "Claude 3 Haiku (Legacy Fast)": "claude-3-haiku-20240307",
                 
                 # Custom Model Entry
                 "Custom Model": "custom"
@@ -820,15 +865,15 @@ def show_settings_modal():
             selected_model_display = st.selectbox(
                 "🤖 Claude Model Selection",
                 options=list(model_options.keys()),
-                index=0,  # Default to Claude 4 Sonnet
-                help="Choose your Claude model. Newer models offer better performance."
+                index=0,  # Default to Claude 3.5 Haiku (most compatible)
+                help="Choose your Claude model. 3.5 models are most widely available."
             )
             
             # Handle custom model input
             if selected_model_display == "Custom Model":
                 selected_model = st.text_input(
                     "Enter Model Name:",
-                    placeholder="claude-sonnet-4-20250514",
+                    placeholder="claude-3-5-haiku-20241022",
                     help="Enter the exact model name from Anthropic's API documentation"
                 )
                 if not selected_model:
@@ -863,6 +908,33 @@ def show_settings_modal():
             )
         
         return api_key, selected_model, confidence_threshold
+
+def validate_api_key_format(api_key: str) -> bool:
+    """Validate Claude API key format"""
+    if not api_key:
+        return False
+    
+    # Claude API keys typically start with 'sk-ant-api03-'
+    if api_key.startswith('sk-ant-api03-') and len(api_key) > 20:
+        return True
+    
+    # Also accept other potential formats for flexibility
+    if api_key.startswith('sk-') and len(api_key) > 15:
+        return True
+    
+    return False
+
+def check_api_key_status():
+    """Check and display API key status in the main interface"""
+    secrets_key = st.secrets.get("CLAUDE_API_KEY", "")
+    session_key = st.session_state.get("current_api_key", "")
+    
+    if secrets_key:
+        return "secrets", secrets_key
+    elif session_key:
+        return "session", session_key
+    else:
+        return "none", ""
 
 def get_model_info(model_name: str) -> dict:
     """Get information about the selected Claude model"""
@@ -1540,6 +1612,76 @@ def main():
             st.info(f"🤖 Model: {results.get('model_used', 'Unknown')}")
         else:
             st.info("⏳ Ready for Analysis")
+        
+        st.markdown("---")
+        
+        # API Key Status in Sidebar
+        st.header("🔑 API Status")
+        api_key_status, current_key = check_api_key_status()
+        
+        if api_key_status == "secrets":
+            st.success("✅ **Secrets Configuration**")
+            st.caption("API key loaded from app secrets")
+        elif api_key_status == "session":
+            st.info("🔑 **Session Key Active**")
+            st.caption("API key entered for this session")
+        else:
+            st.error("❌ **No API Key**")
+            st.caption("Please configure API key in main page")
+            
+        # Quick API key tips
+        with st.expander("💡 API Key Tips", expanded=False):
+            st.markdown("""
+            **🔒 Security Best Practices:**
+            - Use Streamlit secrets for production
+            - Never share your API key
+            - Monitor usage in Claude Console
+            
+            **⚡ Performance Tips:**
+            - Claude 3.5 Haiku: Fastest analysis
+            - Claude 3.5 Sonnet: Balanced performance  
+            - Claude 4 models: Best accuracy
+            
+            **🔧 Troubleshooting:**
+            - Verify key format: `sk-ant-api03-...`
+            - Check credits in Claude Console
+            - Try different model if issues persist
+            """)
+        
+        # Quick model switch
+        if st.session_state.get('analysis_results'):
+            st.markdown("---")
+            st.header("🔄 Quick Actions")
+            if st.button("🧹 Clear All Results", use_container_width=True):
+                # Clear all analysis data
+                keys_to_clear = [k for k in st.session_state.keys() if 'analysis' in k or 'results' in k]
+                for key in keys_to_clear:
+                    del st.session_state[key]
+                st.rerun()
+            
+            if st.button("💾 Export Summary", use_container_width=True):
+                results = st.session_state.get('analysis_results', {})
+                summary = f"""
+# SIEM Analysis Summary
+
+**Rule Description:** {results.get('rule_description', 'N/A')}
+**SIEM Platform:** {results.get('siem_platform', 'Unknown')}
+**Model Used:** {results.get('model_used', 'Unknown')}
+**Analysis Date:** {time.strftime('%Y-%m-%d %H:%M:%S')}
+
+## Top 3 MITRE ATT&CK Techniques:
+"""
+                techniques = results.get('relevant_techniques', [])[:3]
+                for i, tech in enumerate(techniques, 1):
+                    summary += f"{i}. **{tech.id}** - {tech.name} (Confidence: {tech.confidence:.2f})\n"
+                
+                st.download_button(
+                    "📄 Download Summary",
+                    data=summary,
+                    file_name=f"siem_analysis_{time.strftime('%Y%m%d_%H%M%S')}.md",
+                    mime="text/markdown",
+                    use_container_width=True
+                )
     
     # Main content
     if page == "🎯 MITRE Mapping":
