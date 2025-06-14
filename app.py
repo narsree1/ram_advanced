@@ -1,7 +1,6 @@
 """
-Cybersecurity Response Platform - Single File Version
-A comprehensive platform for SIEM rule analysis, incident response planning,
-and SOAR workflow automation using Claude 3.5 Haiku.
+Modern Cybersecurity Response Platform
+A streamlined platform for SIEM rule analysis, MITRE mapping, incident response, and SOAR workflows.
 """
 import streamlit as st
 import anthropic
@@ -17,8 +16,91 @@ st.set_page_config(
     page_title="Cybersecurity Response Platform",
     page_icon="🛡️",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
+
+# Custom CSS for modern look
+st.markdown("""
+<style>
+.main-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 2rem;
+    border-radius: 15px;
+    color: white;
+    text-align: center;
+    margin-bottom: 2rem;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+}
+
+.modern-card {
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(10px);
+    border-radius: 15px;
+    padding: 1.5rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    margin: 1rem 0;
+}
+
+.technique-card {
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    color: white;
+    padding: 1rem;
+    border-radius: 10px;
+    margin: 0.5rem 0;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+}
+
+.step-card {
+    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    color: white;
+    padding: 1.2rem;
+    border-radius: 12px;
+    margin: 1rem 0;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.1);
+}
+
+.recommendation-card {
+    background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+    color: white;
+    padding: 1rem;
+    border-radius: 10px;
+    margin: 0.5rem 0;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+}
+
+.settings-button {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 1000;
+    background: #667eea;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    cursor: pointer;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+}
+
+.workflow-node {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 1rem;
+    border-radius: 10px;
+    text-align: center;
+    margin: 0.5rem;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+}
+
+.workflow-arrow {
+    text-align: center;
+    font-size: 1.5rem;
+    color: #667eea;
+    margin: 0.5rem 0;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # Data Models
 @dataclass
@@ -35,14 +117,13 @@ class SOARWorkflowStep:
     """SOAR workflow step definition"""
     step_id: str
     name: str
-    type: str  # automated, manual, decision
+    type: str
     description: str
     responsible_team: str
     inputs: List[str]
     outputs: List[str]
     next_steps: List[str]
 
-# Core Platform Class
 class CybersecurityResponsePlatform:
     def __init__(self, api_key: str, model_name: str = "claude-3-5-haiku-20241022"):
         """Initialize platform with Claude API"""
@@ -190,7 +271,7 @@ Your task is to recommend the top {k} most probable MITRE ATT&CK techniques or s
 
 Guidelines: 
 - Return results as a JSON array of objects
-- Each object should have: "id", "name", "description"
+- Each object should have: "id", "name", "description", "tactic"
 - Use real MITRE ATT&CK technique IDs (like T1055, T1003.001, etc.)
 - Prioritize techniques that match the specific behaviors described
 
@@ -262,72 +343,97 @@ REASONING: [your detailed reasoning for the score]"""
         relevant_techniques.sort(key=lambda x: x.confidence, reverse=True)
         return relevant_techniques
 
-    def identify_data_source(self, rule_description: str) -> str:
-        """Step 4: Identify MITRE ATT&CK data source"""
-        data_sources = {
-            "process": "Command: Command Execution",
-            "registry": "Windows Registry: Windows Registry Key Modification",
-            "file": "File: File Creation",
-            "network": "Network Traffic: Network Traffic Flow",
-            "endpoint": "Process: Process Creation",
-            "authentication": "Logon Session: Logon Session Creation",
-            "service": "Service: Service Creation"
-        }
-        
-        rule_lower = rule_description.lower()
-        for keyword, data_source in data_sources.items():
-            if keyword in rule_lower:
-                return data_source
-        
-        return "Process: Process Creation"
-
-    def generate_incident_response_plan(self, rule_description: str, mitre_techniques: List[TechniqueResult], siem_rule: str) -> Dict[str, Any]:
-        """Generate comprehensive incident response plan"""
+    def generate_detailed_incident_response(self, rule_description: str, mitre_techniques: List[TechniqueResult], siem_rule: str) -> Dict[str, Any]:
+        """Generate detailed incident response plan following the template structure"""
         siem_platform = self.identify_siem_platform(siem_rule)
+        top_technique = mitre_techniques[0] if mitre_techniques else None
         
         techniques_summary = "\n".join([
             f"- {t.id}: {t.name} (Confidence: {t.confidence:.2f})"
-            for t in mitre_techniques[:5]
+            for t in mitre_techniques[:3]
         ])
         
-        prompt = f"""You are a senior SOC analyst creating platform-specific investigation procedures.
+        prompt = f"""You are a senior SOC analyst creating a detailed incident response playbook following the standard 4-step investigation procedure.
 
-SIEM Platform Detected: {siem_platform}
-Rule Description: {rule_description}
-MITRE ATT&CK Techniques: {techniques_summary}
+DETECTED SIEM PLATFORM: {siem_platform}
+RULE DESCRIPTION: {rule_description}
+TOP MITRE TECHNIQUE: {top_technique.id if top_technique else 'Unknown'} - {top_technique.name if top_technique else 'Unknown'}
+RELATED TECHNIQUES: {techniques_summary}
 
-Create detailed investigation steps using the detected SIEM platform ({siem_platform}).
+Create a comprehensive incident response plan following this EXACT structure:
 
-Format as JSON:
 {{
+  "alert_title": "Security Alert - [Technique Name] Detected",
+  "mitre_classification": {{
+    "category": "Category based on technique",
+    "tactic": "Primary MITRE tactic",
+    "technique": "{top_technique.id if top_technique else 'T1000'}"
+  }},
+  "description": "This notable will trigger when [specific behavior description]",
   "siem_platform": "{siem_platform}",
-  "l1_steps": [
-    {{
-      "step": "Step description",
-      "expected_outcome": "What L1 should find",
-      "escalation_criteria": "When to escalate",
-      "timeline": "Expected time"
+  "investigation_steps": {{
+    "step1_historical": {{
+      "title": "Historical check",
+      "actions": [
+        "Check previous notable events related to the same indicators",
+        "Note any useful comments or additional information from previous incidents", 
+        "Review historical patterns for similar attack vectors"
+      ]
+    }},
+    "step2_duplicate": {{
+      "title": "Duplicate check and add details to Investigation",
+      "actions": [
+        "Search if there is an open incident for the same issue in ServiceNow",
+        "If yes, add new information to existing incident and close new notable as Duplicate",
+        "Verify if this is part of an ongoing investigation"
+      ]
+    }},
+    "step3_investigate": {{
+      "title": "Investigate the events",
+      "siem_queries": [
+        "Platform-specific SIEM query 1 for {siem_platform}",
+        "Platform-specific SIEM query 2 for {siem_platform}",
+        "Platform-specific SIEM query 3 for {siem_platform}"
+      ],
+      "edr_actions": [
+        "Check EDR alerts on affected hosts",
+        "Run memory scan on suspicious processes",
+        "Analyze process tree and parent-child relationships",
+        "Check for persistence mechanisms"
+      ],
+      "data_collection": [
+        "Source IP addresses and geolocations",
+        "User accounts involved",
+        "Timeline of events",
+        "Affected systems and scope"
+      ]
+    }},
+    "step4_recommendations": {{
+      "title": "Recommendations",
+      "immediate_actions": [
+        "Immediate containment action 1",
+        "Immediate containment action 2",
+        "Immediate containment action 3"
+      ],
+      "resolver_teams": [
+        {{
+          "team": "Security Operations",
+          "actions": ["Specific action for SOC team"],
+          "priority": "High",
+          "timeline": "Immediate"
+        }},
+        {{
+          "team": "IT Infrastructure", 
+          "actions": ["Specific action for IT team"],
+          "priority": "Medium",
+          "timeline": "Within 2 hours"
+        }}
+      ]
     }}
-  ],
-  "l2_steps": [
-    {{
-      "step": "Advanced analysis step",
-      "expected_outcome": "What L2 should discover",
-      "escalation_criteria": "When to escalate",
-      "timeline": "Expected time"
-    }}
-  ],
-  "resolver_recommendations": [
-    {{
-      "team": "Team name",
-      "action": "Specific action",
-      "priority": "High/Medium/Low",
-      "timeline": "Expected completion"
-    }}
-  ]
+  }}
 }}
 
-Return only the JSON object:"""
+Return only the JSON object with detailed, actionable steps:"""
         
         try:
             response_text = self._call_claude(prompt, max_tokens=4096, temperature=0.2)
@@ -340,30 +446,90 @@ Return only the JSON object:"""
             return {}
 
     def generate_soar_workflow(self, rule_description: str, mitre_techniques: List[TechniqueResult]) -> List[SOARWorkflowStep]:
-        """Generate SOAR workflow from alert trigger to case closure"""
+        """Generate visual SOAR workflow"""
         techniques_summary = "\n".join([
             f"- {t.id}: {t.name}"
             for t in mitre_techniques[:3]
         ])
         
-        prompt = f"""You are a SOAR architect designing an automated workflow for incident response.
+        prompt = f"""You are a SOAR architect designing a visual workflow from alert to resolution.
 
-Create a complete SOAR workflow from alert trigger to case closure.
+Create a comprehensive SOAR workflow with clear visual steps that can be displayed as a top-down graph.
 
-SIEM Rule: {rule_description}
-Key Techniques: {techniques_summary}
+RULE DESCRIPTION: {rule_description}
+KEY TECHNIQUES: {techniques_summary}
 
-Return as JSON array of workflow steps:
+Return as JSON array with these specific workflow steps:
 [
   {{
-    "step_id": "STEP_001",
-    "name": "Alert Ingestion", 
+    "step_id": "START",
+    "name": "Alert Triggered", 
     "type": "automated",
-    "description": "Description of the step",
-    "responsible_team": "SIEM/SOAR Platform",
-    "inputs": ["alert_data"],
+    "description": "SIEM rule triggered and alert generated",
+    "responsible_team": "SIEM Platform",
+    "inputs": ["raw_log_data"],
+    "outputs": ["structured_alert"],
+    "next_steps": ["ENRICH"]
+  }},
+  {{
+    "step_id": "ENRICH",
+    "name": "Alert Enrichment",
+    "type": "automated", 
+    "description": "Gather additional context from threat intelligence and asset databases",
+    "responsible_team": "SOAR Platform",
+    "inputs": ["structured_alert"],
     "outputs": ["enriched_alert"],
-    "next_steps": ["STEP_002"]
+    "next_steps": ["TRIAGE"]
+  }},
+  {{
+    "step_id": "TRIAGE",
+    "name": "Initial Triage",
+    "type": "manual",
+    "description": "L1 analyst reviews alert and determines severity",
+    "responsible_team": "L1 SOC Analyst", 
+    "inputs": ["enriched_alert"],
+    "outputs": ["triage_decision"],
+    "next_steps": ["INVESTIGATE"]
+  }},
+  {{
+    "step_id": "INVESTIGATE",
+    "name": "Deep Investigation",
+    "type": "manual",
+    "description": "L2 analyst performs detailed investigation using SIEM and EDR",
+    "responsible_team": "L2 SOC Analyst",
+    "inputs": ["triage_decision"],
+    "outputs": ["investigation_results"],
+    "next_steps": ["CONTAIN"]
+  }},
+  {{
+    "step_id": "CONTAIN",
+    "name": "Containment Actions",
+    "type": "decision",
+    "description": "Determine if containment is needed based on investigation",
+    "responsible_team": "SOC Manager",
+    "inputs": ["investigation_results"],
+    "outputs": ["containment_decision"],
+    "next_steps": ["RESOLVE"]
+  }},
+  {{
+    "step_id": "RESOLVE",
+    "name": "Resolution & Documentation",
+    "type": "manual",
+    "description": "Complete remediation and document lessons learned",
+    "responsible_team": "Security Team",
+    "inputs": ["containment_decision"],
+    "outputs": ["incident_report"],
+    "next_steps": ["CLOSE"]
+  }},
+  {{
+    "step_id": "CLOSE",
+    "name": "Case Closure",
+    "type": "automated",
+    "description": "Close ticket in ITSM and update metrics",
+    "responsible_team": "SOAR Platform",
+    "inputs": ["incident_report"],
+    "outputs": ["closed_case"],
+    "next_steps": []
   }}
 ]
 
@@ -401,12 +567,11 @@ Return only the JSON array:"""
             iocs = self.extract_iocs(siem_rule)
             context_info = self.retrieve_contextual_info(iocs)
             rule_description = self.translate_to_natural_language(siem_rule, iocs, context_info)
-            data_source = self.identify_data_source(rule_description)
             probable_techniques = self.recommend_probable_techniques(rule_description)
             relevant_techniques = self.extract_relevant_techniques(rule_description, probable_techniques, confidence_threshold)
             
             # Incident response plan
-            incident_plan = self.generate_incident_response_plan(rule_description, relevant_techniques, siem_rule)
+            incident_plan = self.generate_detailed_incident_response(rule_description, relevant_techniques, siem_rule)
             
             # SOAR workflow
             soar_workflow = self.generate_soar_workflow(rule_description, relevant_techniques)
@@ -415,7 +580,6 @@ Return only the JSON array:"""
                 'rule_description': rule_description,
                 'iocs': iocs,
                 'context_info': context_info,
-                'data_source': data_source,
                 'relevant_techniques': relevant_techniques,
                 'incident_plan': incident_plan,
                 'soar_workflow': soar_workflow,
@@ -428,111 +592,77 @@ Return only the JSON array:"""
             st.error(f"Analysis failed: {str(e)}")
             return results
 
-# Display Functions
-def display_home_page():
-    """Display the home page with platform overview"""
-    st.title("🛡️ Cybersecurity Response Platform")
-    st.markdown("**Comprehensive SIEM analysis, incident response planning, and SOAR workflow automation**")
-    
-    # Platform overview
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown("""
-        ### 🎯 MITRE Mapping
-        **Automated ATT&CK Technique Identification**
+# Settings Modal
+def show_settings_modal():
+    """Display settings modal"""
+    with st.expander("⚙️ Configuration Settings", expanded=False):
+        col1, col2 = st.columns(2)
         
-        - Extract IoCs from SIEM rules
-        - Map to MITRE ATT&CK framework
-        - Confidence scoring & reasoning
-        - Support for all major SIEM platforms
+        with col1:
+            # API Key setup
+            default_api_key = st.secrets.get("CLAUDE_API_KEY", "")
+            
+            if default_api_key:
+                api_key = default_api_key
+                st.success("✅ API Key loaded from secrets")
+            else:
+                api_key = st.text_input(
+                    "Claude API Key", 
+                    type="password",
+                    placeholder="Enter your Claude API key...",
+                    help="Get your API key from https://console.anthropic.com/"
+                )
+                if api_key:
+                    st.success("✅ API Key configured")
         
-        **Supported Platforms:**
-        - 🟠 Splunk (SPL)
-        - 🔵 Microsoft Sentinel (KQL)
-        - 🟢 Elastic Stack (JSON DSL)
-        - 🔴 IBM QRadar (SQL)
-        - 🟡 Google Chronicle (UDM)
-        """)
-    
-    with col2:
-        st.markdown("""
-        ### 📋 Incident Response
-        **Template-Based Investigation Procedures**
+        with col2:
+            # Model selection
+            model_options = {
+                "Claude 3.5 Haiku (Fast)": "claude-3-5-haiku-20241022",
+                "Claude 3.5 Sonnet (Accurate)": "claude-3-5-sonnet-20241022", 
+            }
+            
+            selected_model_display = st.selectbox(
+                "🤖 Model Selection",
+                options=list(model_options.keys()),
+                index=0,
+                help="Haiku is fastest for structured analysis tasks"
+            )
+            selected_model = model_options[selected_model_display]
+            
+            confidence_threshold = st.slider(
+                "Confidence Threshold",
+                min_value=0.1,
+                max_value=1.0,
+                value=0.7,
+                step=0.1,
+                help="Minimum confidence score for technique relevance"
+            )
         
-        - Structured 4-step approach
-        - Historical analysis & duplicate checks
-        - Platform-specific SIEM commands
-        - Multi-EDR integration support
-        
-        **Investigation Steps:**
-        - 📊 **Step 1:** Historical check
-        - 🔍 **Step 2:** Duplicate verification
-        - 🕵️ **Step 3:** Event investigation
-        - 💡 **Step 4:** Recommendations
-        """)
-    
-    with col3:
-        st.markdown("""
-        ### 🔄 SOAR Workflow
-        **Visual Workflow Automation**
-        
-        - Interactive workflow diagrams
-        - End-to-end automation steps
-        - Decision points & manual interventions
-        - ServiceNow integration templates
-        
-        **Workflow Components:**
-        - 🤖 Automated actions
-        - 👤 Manual review points
-        - 🤔 Decision branches
-        - 🎫 ITSM integration
-        """)
-    
-    st.markdown("---")
-    
-    # Getting started section
-    st.header("🚀 Getting Started")
-    
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        st.markdown("""
-        ### Quick Start Guide:
-        
-        1. **📝 Rule Analysis**: Enter your SIEM rule in any format (SPL, KQL, JSON DSL, etc.)
-        2. **🎯 MITRE Mapping**: View automatically mapped ATT&CK techniques with confidence scores
-        3. **📋 Incident Response**: Get template-based investigation procedures for your platform
-        4. **🔄 SOAR Workflow**: Visualize and export the complete automation workflow
-        
-        **Supported SIEM Rule Formats:**
-        - Splunk Search Processing Language (SPL)
-        - Microsoft Sentinel Kusto Query Language (KQL)
-        - Elasticsearch Query DSL (JSON)
-        - IBM QRadar SQL queries
-        - Google Chronicle UDM syntax
-        - Generic detection logic
-        """)
-    
-    with col2:
-        st.info("""
-        **💡 Pro Tips:**
-        
-        ✅ Start with the Rule Analysis page
-        
-        ✅ Configure your Claude API key in the sidebar
-        
-        ✅ Adjust confidence threshold for MITRE mapping
-        
-        ✅ Export results for your SOAR platform
-        """)
+        return api_key, selected_model, confidence_threshold
 
-def display_rule_analysis_page(api_key, selected_model, confidence_threshold):
-    """Display the rule analysis input page"""
-    st.title("📝 SIEM Rule Analysis")
-    st.markdown("**Enter your SIEM rule to begin comprehensive analysis**")
+# Main Pages
+def display_mitre_mapping_page():
+    """Modern MITRE mapping page"""
+    # Header
+    st.markdown("""
+    <div class="main-header">
+        <h1>🛡️ Cybersecurity Response Platform</h1>
+        <p>Advanced SIEM Rule Analysis & MITRE ATT&CK Mapping</p>
+    </div>
+    """, unsafe_allow_html=True)
     
-    # Example rules
+    # Settings
+    api_key, selected_model, confidence_threshold = show_settings_modal()
+    
+    if not api_key:
+        st.error("⚠️ Please configure your Claude API key in the settings above")
+        return
+    
+    # SIEM Rule Input Section
+    st.markdown("### 🔍 SIEM Rule Analysis")
+    
+    # Example rules with modern styling
     example_rules = {
         "Splunk - Suspicious PowerShell": """index=main sourcetype="WinEventLog:Security" EventCode=4688 | search process_name="*powershell.exe*" command_line="*-EncodedCommand*" | stats count by host, user, process_name, command_line""",
         "Microsoft Sentinel - Suspicious Login": """SecurityEvent | where EventID == 4624 | where LogonType == 10 | summarize count() by Account, IpAddress | where count_ > 10""",
@@ -542,36 +672,34 @@ def display_rule_analysis_page(api_key, selected_model, confidence_threshold):
     col1, col2 = st.columns([3, 1])
     
     with col1:
-        selected_example = st.selectbox("Choose example or enter custom:", ["Custom"] + list(example_rules.keys()))
+        selected_example = st.selectbox("📋 Choose Example or Enter Custom:", ["Custom"] + list(example_rules.keys()))
         
         if selected_example != "Custom":
             siem_rule = st.text_area(
                 "SIEM Rule:", 
                 value=example_rules[selected_example],
-                height=150,
-                help="SIEM rule in any format (Splunk SPL, Elasticsearch, KQL, etc.)"
+                height=120,
+                help="SIEM rule in any format"
             )
         else:
             siem_rule = st.text_area(
                 "SIEM Rule:", 
-                height=150,
+                height=120,
                 placeholder="Enter your SIEM rule here...",
-                help="SIEM rule in any format (Splunk SPL, Elasticsearch, KQL, etc.)"
+                help="SIEM rule in any format"
             )
     
     with col2:
-        st.markdown("**Analysis Actions:**")
-        analyze_button = st.button("🔍 Analyze Rule", type="primary", use_container_width=True)
+        analyze_button = st.button("🚀 Analyze Rule", type="primary", use_container_width=True, height=3)
         
-        st.markdown("**Current Configuration:**")
-        st.info(f"🤖 **Model:** {selected_model.split('-')[2].title()}\n\n🎯 **Confidence:** {confidence_threshold}")
+        if st.session_state.get('analysis_results'):
+            st.success("✅ Analysis Complete")
+            if st.button("🔄 Clear Results", use_container_width=True):
+                del st.session_state['analysis_results']
+                st.rerun()
     
     # Process analysis
     if analyze_button and siem_rule.strip():
-        if not api_key:
-            st.error("Please configure your Claude API key in the sidebar")
-            return
-            
         with st.spinner("🔍 Analyzing SIEM rule..."):
             platform = CybersecurityResponsePlatform(api_key, selected_model)
             
@@ -580,26 +708,25 @@ def display_rule_analysis_page(api_key, selected_model, confidence_threshold):
             status_text = st.empty()
             
             try:
-                status_text.text("Step 1/4: Extracting IoCs...")
+                status_text.text("🔍 Extracting IoCs and mapping to MITRE ATT&CK...")
                 progress_bar.progress(25)
                 
                 results = platform.run_complete_analysis(siem_rule, confidence_threshold)
                 
                 progress_bar.progress(50)
-                status_text.text("Step 2/4: Mapping to MITRE ATT&CK...")
+                status_text.text("🎯 Identifying attack techniques...")
                 time.sleep(0.5)
                 
                 progress_bar.progress(75)
-                status_text.text("Step 3/4: Generating response plan...")
+                status_text.text("📋 Generating response procedures...")
                 time.sleep(0.5)
                 
                 progress_bar.progress(100)
-                status_text.text("Step 4/4: Creating workflow...")
+                status_text.text("✅ Analysis complete!")
                 time.sleep(0.5)
                 
                 if results:
                     st.session_state['analysis_results'] = results
-                    status_text.text("✅ Analysis complete!")
                     st.success("🎉 Analysis completed successfully!")
                     st.balloons()
                 else:
@@ -607,143 +734,197 @@ def display_rule_analysis_page(api_key, selected_model, confidence_threshold):
                 
             except Exception as e:
                 st.error(f"Analysis failed: {str(e)}")
-
-def display_mitre_mapping(results):
-    """Display MITRE ATT&CK mapping results"""
-    st.header("🎯 MITRE ATT&CK Mapping Results")
     
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        st.subheader("📋 Rule Description")
-        st.write(results['rule_description'])
+    # Display results
+    if st.session_state.get('analysis_results'):
+        results = st.session_state['analysis_results']
         
-        st.subheader("🎯 Relevant MITRE ATT&CK Techniques")
+        st.markdown("---")
+        
+        # Rule Description
+        st.markdown("### 📝 Rule Description")
+        st.info(results['rule_description'])
+        
+        # MITRE ATT&CK Techniques
+        st.markdown("### 🎯 MITRE ATT&CK Techniques")
         
         if results['relevant_techniques']:
-            for i, technique in enumerate(results['relevant_techniques'][:5]):
-                with st.expander(f"**{technique.id}** - {technique.name} (Confidence: {technique.confidence:.2f})", expanded=(i==0)):
-                    st.write(f"**Description:** {technique.description}")
-                    st.write(f"**Reasoning:** {technique.reasoning}")
-                    st.progress(technique.confidence)
+            cols = st.columns(2)
+            for i, technique in enumerate(results['relevant_techniques'][:4]):
+                with cols[i % 2]:
+                    st.markdown(f"""
+                    <div class="technique-card">
+                        <h4>{technique.id} - {technique.name}</h4>
+                        <p><strong>Confidence:</strong> {technique.confidence:.2f}</p>
+                        <p>{technique.description[:150]}...</p>
+                    </div>
+                    """, unsafe_allow_html=True)
         else:
             st.warning("No relevant techniques found.")
-    
-    with col2:
-        st.subheader("📊 Analysis Summary")
         
-        if results['relevant_techniques']:
-            st.metric("Techniques Found", len(results['relevant_techniques']))
-            avg_confidence = sum(t.confidence for t in results['relevant_techniques']) / len(results['relevant_techniques'])
-            st.metric("Avg Confidence", f"{avg_confidence:.2f}")
-        
-        st.subheader("🔍 Data Source")
-        st.info(f"**{results['data_source']}**")
-        
-        with st.expander("🔍 Extracted IoCs"):
-            st.json(results['iocs'])
+        # Analysis Summary
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("🎯 Techniques Found", len(results['relevant_techniques']))
+        with col2:
+            if results['relevant_techniques']:
+                avg_confidence = sum(t.confidence for t in results['relevant_techniques']) / len(results['relevant_techniques'])
+                st.metric("📊 Avg Confidence", f"{avg_confidence:.2f}")
+        with col3:
+            st.metric("🖥️ SIEM Platform", results['siem_platform'])
 
-def display_incident_response_plan(results):
-    """Display incident response plan"""
-    st.header("📋 Incident Response Plan")
+def display_incident_response_page():
+    """Enhanced incident response page"""
+    st.title("📋 Incident Response Playbook")
     
-    if not results.get('incident_plan'):
-        st.warning("No incident response plan generated.")
+    if not st.session_state.get('analysis_results'):
+        st.info("👈 **Please complete MITRE mapping first to generate incident response procedures**")
         return
     
-    plan = results['incident_plan']
-    top_technique = results['relevant_techniques'][0] if results['relevant_techniques'] else None
+    results = st.session_state['analysis_results']
+    plan = results.get('incident_plan', {})
     
-    # Generate incident title
-    incident_title = f"Security Alert - {top_technique.name if top_technique else 'Suspicious Activity'} Detected"
+    if not plan:
+        st.warning("No incident response plan available.")
+        return
     
-    st.title(f"📋 {incident_title}")
+    # Alert Header
+    st.markdown(f"""
+    <div class="main-header">
+        <h2>🚨 {plan.get('alert_title', 'Security Alert')}</h2>
+        <p>Structured Investigation Playbook</p>
+    </div>
+    """, unsafe_allow_html=True)
     
-    # MITRE ATT&CK Classification
-    st.subheader("🎯 MITRE ATT&CK Classification")
+    # MITRE Classification
+    classification = plan.get('mitre_classification', {})
+    col1, col2, col3 = st.columns(3)
     
-    if top_technique:
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.markdown("**Category**")
-            st.info("Suspicious System Activity")
-        
-        with col2:
-            st.markdown("**MITRE Tactic**")
-            st.info("Execution")
-        
-        with col3:
-            st.markdown("**MITRE Technique**")
-            st.info(f"{top_technique.id}")
+    with col1:
+        st.markdown("**Category**")
+        st.info(classification.get('category', 'Unknown'))
     
-    st.subheader("📝 Description")
-    st.write(f"This notable will trigger when {results['rule_description'].lower()}")
+    with col2:
+        st.markdown("**MITRE Tactic**")
+        st.info(classification.get('tactic', 'Unknown'))
     
-    # SIEM Platform Detection
-    siem_platform = plan.get('siem_platform', 'Generic SIEM')
-    st.info(f"🔧 **Detected SIEM Platform:** {siem_platform}")
+    with col3:
+        st.markdown("**MITRE Technique**")
+        st.info(classification.get('technique', 'Unknown'))
+    
+    # Description
+    st.markdown("### 📝 Description")
+    st.write(plan.get('description', 'No description available'))
+    
+    st.markdown(f"**🔧 Detected SIEM Platform:** {plan.get('siem_platform', 'Unknown')}")
     
     st.markdown("---")
     
-    # Investigation steps
-    st.header("🕵️ Investigation Steps")
+    # Investigation Steps
+    st.markdown("## 🕵️ Investigation Steps")
     
-    # Step 1: Historical check
-    st.subheader("📊 Step 1: Historical check")
-    st.markdown("""
-    - Check previous notable events related to the same indicators
-    - Note any useful comments or additional information from previous incidents
-    - Review historical patterns for similar attack vectors
-    """)
+    investigation = plan.get('investigation_steps', {})
     
-    # Step 2: Duplicate check
-    st.subheader("🔍 Step 2: Duplicate check and add details to Investigation")
-    st.markdown("""
-    - Search if there is an open incident for the same issue in ServiceNow
-    - If yes, add new information to existing incident
-    - Close new notable as Duplicate if appropriate
-    """)
+    # Step 1: Historical Check
+    step1 = investigation.get('step1_historical', {})
+    st.markdown(f"""
+    <div class="step-card">
+        <h3>📊 Step 1: {step1.get('title', 'Historical check')}</h3>
+    </div>
+    """, unsafe_allow_html=True)
     
-    # Step 3: Investigate the events
-    st.subheader("🕵️ Step 3: Investigate the events")
-    st.markdown("**L1 Investigation Procedures:**")
+    for action in step1.get('actions', []):
+        st.markdown(f"• {action}")
     
-    if plan.get('l1_steps'):
-        for i, step in enumerate(plan['l1_steps'], 1):
-            with st.expander(f"L1.{i}: {step.get('step', 'Investigation Step')}", expanded=(i==1)):
-                st.write(step.get('step', 'No description'))
-                st.write(f"**Expected Outcome:** {step.get('expected_outcome', 'Gather evidence')}")
-                st.write(f"**Timeline:** {step.get('timeline', '15-20 minutes')}")
+    # Step 2: Duplicate Check
+    step2 = investigation.get('step2_duplicate', {})
+    st.markdown(f"""
+    <div class="step-card">
+        <h3>🔍 Step 2: {step2.get('title', 'Duplicate check')}</h3>
+    </div>
+    """, unsafe_allow_html=True)
     
-    if plan.get('l2_steps'):
-        st.markdown("**L2 Deep Analysis:**")
-        for i, step in enumerate(plan['l2_steps'], 1):
-            with st.expander(f"L2.{i}: {step.get('step', 'Deep Analysis Step')}"):
-                st.write(step.get('step', 'No description'))
-                st.write(f"**Expected Outcome:** {step.get('expected_outcome', 'Comprehensive analysis')}")
+    for action in step2.get('actions', []):
+        st.markdown(f"• {action}")
+    
+    # Step 3: Investigation
+    step3 = investigation.get('step3_investigate', {})
+    st.markdown(f"""
+    <div class="step-card">
+        <h3>🕵️ Step 3: {step3.get('title', 'Investigate the events')}</h3>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # SIEM Queries
+    if step3.get('siem_queries'):
+        st.markdown("**🔍 SIEM Queries:**")
+        for query in step3.get('siem_queries', []):
+            st.code(query, language='sql')
+    
+    # EDR Actions
+    if step3.get('edr_actions'):
+        st.markdown("**🛡️ EDR Actions:**")
+        for action in step3.get('edr_actions', []):
+            st.markdown(f"• {action}")
+    
+    # Data Collection
+    if step3.get('data_collection'):
+        st.markdown("**📊 Data Collection:**")
+        for item in step3.get('data_collection', []):
+            st.markdown(f"• {item}")
     
     # Step 4: Recommendations
-    st.subheader("💡 Step 4: Recommendations")
+    step4 = investigation.get('step4_recommendations', {})
+    st.markdown(f"""
+    <div class="step-card">
+        <h3>💡 Step 4: {step4.get('title', 'Recommendations')}</h3>
+    </div>
+    """, unsafe_allow_html=True)
     
-    if plan.get('resolver_recommendations'):
-        for rec in plan['resolver_recommendations']:
-            priority_emoji = {'High': '🔴', 'Medium': '🟡', 'Low': '🟢'}.get(rec.get('priority', 'Medium'), '🟡')
-            st.markdown(f"**{priority_emoji} {rec.get('team', 'Security Team')}:**")
-            st.markdown(f"- {rec.get('action', 'Take appropriate action')}")
-            st.markdown(f"- Priority: {rec.get('priority', 'Medium')} | Timeline: {rec.get('timeline', 'ASAP')}")
+    # Immediate Actions
+    if step4.get('immediate_actions'):
+        st.markdown("**🚨 Immediate Actions:**")
+        for action in step4.get('immediate_actions', []):
+            st.markdown(f"• {action}")
+    
+    # Resolver Teams
+    if step4.get('resolver_teams'):
+        st.markdown("**👥 Resolver Team Actions:**")
+        for team_action in step4.get('resolver_teams', []):
+            priority_emoji = {'High': '🔴', 'Medium': '🟡', 'Low': '🟢'}.get(team_action.get('priority', 'Medium'), '🟡')
+            
+            st.markdown(f"""
+            <div class="recommendation-card">
+                <h4>{priority_emoji} {team_action.get('team', 'Team')}</h4>
+                <p><strong>Actions:</strong> {', '.join(team_action.get('actions', []))}</p>
+                <p><strong>Priority:</strong> {team_action.get('priority', 'Medium')} | <strong>Timeline:</strong> {team_action.get('timeline', 'ASAP')}</p>
+            </div>
+            """, unsafe_allow_html=True)
 
-def display_soar_workflow(results):
-    """Display SOAR workflow"""
-    st.header("🔄 SOAR Workflow")
+def display_soar_workflow_page():
+    """Visual SOAR workflow page"""
+    st.title("🔄 SOAR Workflow")
     
-    if not results.get('soar_workflow'):
-        st.warning("No SOAR workflow generated.")
+    if not st.session_state.get('analysis_results'):
+        st.info("👈 **Please complete MITRE mapping first to generate SOAR workflow**")
         return
     
-    workflow = results['soar_workflow']
+    results = st.session_state['analysis_results']
+    workflow = results.get('soar_workflow', [])
     
-    # Workflow overview
+    if not workflow:
+        st.warning("No SOAR workflow available.")
+        return
+    
+    # Workflow Header
+    st.markdown("""
+    <div class="main-header">
+        <h2>🔄 SOAR Automation Workflow</h2>
+        <p>End-to-End Incident Response Automation</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Workflow Metrics
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         automated_steps = sum(1 for step in workflow if step.type == 'automated')
@@ -757,21 +938,28 @@ def display_soar_workflow(results):
     with col4:
         st.metric("📋 Total Steps", len(workflow))
     
-    # Interactive Visual Workflow
-    st.subheader("📊 Interactive Workflow Diagram")
+    # Visual Workflow (Graph TD - Top Down)
+    st.markdown("### 📊 Visual Workflow Diagram")
     
-    # Generate workflow HTML
-    workflow_html = f"""
-    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 10px; color: white; text-align: center;">
-        <h3>🔄 SOAR Automation Workflow</h3>
-        <p>End-to-End Incident Response Automation</p>
-    </div>
-    """
+    # Create visual workflow
+    for i, step in enumerate(workflow):
+        type_emoji = {"automated": "🤖", "manual": "👤", "decision": "🤔"}.get(step.type, "📋")
+        
+        # Workflow node
+        st.markdown(f"""
+        <div class="workflow-node">
+            <h4>{type_emoji} {step.step_id}</h4>
+            <h5>{step.name}</h5>
+            <p>{step.responsible_team}</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Arrow (except for last step)
+        if i < len(workflow) - 1:
+            st.markdown('<div class="workflow-arrow">⬇️</div>', unsafe_allow_html=True)
     
-    st.markdown(workflow_html, unsafe_allow_html=True)
-    
-    # Detailed workflow steps
-    st.subheader("📋 Detailed Workflow Steps")
+    # Detailed Steps
+    st.markdown("### 📋 Detailed Workflow Steps")
     
     for i, step in enumerate(workflow):
         type_emoji = {"automated": "🤖", "manual": "👤", "decision": "🤔"}.get(step.type, "📋")
@@ -779,6 +967,7 @@ def display_soar_workflow(results):
         with st.expander(f"{type_emoji} {step.step_id}: {step.name}", expanded=(i<3)):
             st.write(f"**Description:** {step.description}")
             st.write(f"**Responsible Team:** {step.responsible_team}")
+            st.write(f"**Type:** {step.type.title()}")
             
             if step.inputs:
                 st.write("**Required Inputs:**")
@@ -789,9 +978,12 @@ def display_soar_workflow(results):
                 st.write("**Expected Outputs:**")
                 for out in step.outputs:
                     st.write(f"• {out}")
+            
+            if step.next_steps:
+                st.write(f"**Next Steps:** {', '.join(step.next_steps)}")
     
-    # Export options
-    st.subheader("📤 Export Options")
+    # Export Options
+    st.markdown("### 📤 Export Options")
     
     col1, col2 = st.columns(2)
     
@@ -834,110 +1026,40 @@ def display_soar_workflow(results):
 def main():
     # Sidebar navigation
     with st.sidebar:
-        st.title("🛡️ Cyber Platform")
+        st.title("🛡️ Navigation")
         st.markdown("---")
         
-        # Navigation
         page = st.selectbox(
-            "📍 Navigate to:",
-            ["🏠 Home", "📝 Rule Analysis", "🎯 MITRE Mapping", "📋 Incident Response", "🔄 SOAR Workflow"],
+            "📍 Go to:",
+            ["🎯 MITRE Mapping", "📋 Incident Response", "🔄 SOAR Workflow"],
             index=0
         )
         
         st.markdown("---")
         
-        # Configuration section
-        st.header("⚙️ Configuration")
-        
-        # API Key setup
-        default_api_key = st.secrets.get("CLAUDE_API_KEY", "")
-        
-        if default_api_key:
-            api_key = default_api_key
-            st.success("✅ API Key loaded")
-        else:
-            api_key = st.text_input(
-                "Claude API Key", 
-                type="password",
-                placeholder="Enter your Claude API key...",
-                help="Get your API key from https://console.anthropic.com/"
-            )
-            
-            if not api_key and page not in ["🏠 Home"]:
-                st.warning("Please enter your Claude API key")
-                st.stop()
-        
-        # Model selection
-        model_options = {
-            "Claude 3.5 Haiku": "claude-3-5-haiku-20241022",
-            "Claude 3.5 Sonnet": "claude-3-5-sonnet-20241022", 
-        }
-        
-        selected_model_display = st.selectbox(
-            "🤖 Model Selection",
-            options=list(model_options.keys()),
-            index=0,
-            help="Choose the Claude model. Haiku is fastest for structured tasks."
-        )
-        selected_model = model_options[selected_model_display]
-        
-        confidence_threshold = st.slider(
-            "Confidence Threshold",
-            min_value=0.1,
-            max_value=1.0,
-            value=0.7,
-            step=0.1,
-            help="Minimum confidence score for technique relevance"
-        )
-        
-        st.markdown("---")
-        
-        # Status section
-        st.header("📊 Status")
-        if 'analysis_results' in st.session_state:
+        # Status
+        if st.session_state.get('analysis_results'):
             st.success("✅ Analysis Complete")
-            st.info(f"🤖 Model: {selected_model_display}")
             
-            if st.button("🔄 Clear Results", use_container_width=True):
-                del st.session_state['analysis_results']
-                st.rerun()
+            results = st.session_state['analysis_results']
+            st.info(f"🖥️ Platform: {results.get('siem_platform', 'Unknown')}")
+            st.info(f"🎯 Techniques: {len(results.get('relevant_techniques', []))}")
         else:
             st.info("⏳ Ready for Analysis")
-
-    # Main content area - render based on selected page
-    if page == "🏠 Home":
-        display_home_page()
-        
-    elif page == "📝 Rule Analysis":
-        display_rule_analysis_page(api_key, selected_model, confidence_threshold)
-        
-    elif page == "🎯 MITRE Mapping":
-        if 'analysis_results' in st.session_state:
-            display_mitre_mapping(st.session_state['analysis_results'])
-        else:
-            st.header("🎯 MITRE ATT&CK Mapping")
-            st.info("👈 **Go to 'Rule Analysis' to analyze a SIEM rule first**")
-            
+    
+    # Main content
+    if page == "🎯 MITRE Mapping":
+        display_mitre_mapping_page()
     elif page == "📋 Incident Response":
-        if 'analysis_results' in st.session_state:
-            display_incident_response_plan(st.session_state['analysis_results'])
-        else:
-            st.header("📋 Incident Response Plan")
-            st.info("👈 **Go to 'Rule Analysis' to analyze a SIEM rule first**")
-            
+        display_incident_response_page()
     elif page == "🔄 SOAR Workflow":
-        if 'analysis_results' in st.session_state:
-            display_soar_workflow(st.session_state['analysis_results'])
-        else:
-            st.header("🔄 SOAR Workflow")
-            st.info("👈 **Go to 'Rule Analysis' to analyze a SIEM rule first**")
+        display_soar_workflow_page()
 
     # Footer
     st.markdown("---")
     st.markdown("""
-    <div style='text-align: center'>
-        <p>Built with ❤️ using Streamlit and Claude API</p>
-        <p><a href='https://console.anthropic.com/'>🔑 Get Claude API Key</a></p>
+    <div style='text-align: center; color: #666;'>
+        <p>🛡️ Cybersecurity Response Platform | Built with Streamlit & Claude API</p>
     </div>
     """, unsafe_allow_html=True)
 
