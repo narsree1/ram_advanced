@@ -157,7 +157,7 @@ class CybersecurityResponsePlatform:
             return ""
 
     def extract_iocs(self, siem_rule: str) -> Dict[str, List[str]]:
-        """Step 1: Extract IoCs from SIEM rule"""
+        """Step 1: Extract IoCs from SIEM rule with improved error handling"""
         prompt = f"""You are a cybersecurity specialist analyzing SIEM rules.
 
 Your task is to identify and extract all Indicators of Compromise (IoCs) from the provided SIEM rule. Extract types like processes, files, IP addresses, registry keys, log sources, event codes, network ports, domains.
@@ -173,12 +173,28 @@ Return only the JSON dictionary, no other text."""
         
         try:
             response_text = self._call_claude(prompt, max_tokens=1024, temperature=0.1)
+            if not response_text:
+                return {}
+                
             json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
             if json_match:
-                return json.loads(json_match.group())
+                parsed_data = json.loads(json_match.group())
+                # Ensure all values are lists
+                cleaned_data = {}
+                for key, value in parsed_data.items():
+                    if isinstance(value, list):
+                        cleaned_data[key] = value
+                    elif isinstance(value, str):
+                        cleaned_data[key] = [value]
+                    else:
+                        cleaned_data[key] = []
+                return cleaned_data
+            return {}
+        except json.JSONDecodeError as e:
+            st.warning(f"JSON parsing error in IoC extraction: {str(e)}")
             return {}
         except Exception as e:
-            st.error(f"Error extracting IoCs: {str(e)}")
+            st.warning(f"Error extracting IoCs: {str(e)}")
             return {}
 
     def search_web_context(self, query: str) -> str:
@@ -203,12 +219,19 @@ Return only the JSON dictionary, no other text."""
         context_info = {}
         delay = 0.2 if "haiku" in self.model_name.lower() else 0.3
         
+        # Handle case where iocs_dict might be None or empty
+        if not iocs_dict:
+            return context_info
+            
         for ioc_type, ioc_values in iocs_dict.items():
-            for ioc_value in ioc_values[:3]:
-                search_query = f"cybersecurity {ioc_value} malware analysis threat"
-                context = self.search_web_context(search_query)
-                context_info[ioc_value] = context
-                time.sleep(delay)
+            # Ensure ioc_values is a list and not None
+            if ioc_values and isinstance(ioc_values, list):
+                for ioc_value in ioc_values[:3]:
+                    if ioc_value:  # Ensure ioc_value is not None or empty
+                        search_query = f"cybersecurity {ioc_value} malware analysis threat"
+                        context = self.search_web_context(search_query)
+                        context_info[ioc_value] = context
+                        time.sleep(delay)
         
         return context_info
 
@@ -265,7 +288,7 @@ Provide a clear, natural language explanation of what this rule detects:"""
         return "Generic SIEM"
 
     def recommend_probable_techniques(self, rule_description: str, k: int = 11) -> List[Dict]:
-        """Step 5: Recommend probable MITRE ATT&CK techniques"""
+        """Step 5: Recommend probable MITRE ATT&CK techniques with improved error handling"""
         prompt = f"""You are a cybersecurity expert mapping SIEM rules to MITRE ATT&CK techniques.
 
 Your task is to recommend the top {k} most probable MITRE ATT&CK techniques or sub-techniques that match this detection rule. Focus on what attack behaviors this rule would detect.
@@ -283,12 +306,23 @@ Return only the JSON array, no other text:"""
         
         try:
             response_text = self._call_claude(prompt, max_tokens=2048, temperature=0.1)
+            if not response_text:
+                return []
+                
             json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
             if json_match:
-                return json.loads(json_match.group())
+                parsed_data = json.loads(json_match.group())
+                # Ensure we have a list of dictionaries
+                if isinstance(parsed_data, list):
+                    return parsed_data
+                else:
+                    return []
+            return []
+        except json.JSONDecodeError as e:
+            st.warning(f"JSON parsing error in technique recommendation: {str(e)}")
             return []
         except Exception as e:
-            st.error(f"Error recommending techniques: {str(e)}")
+            st.warning(f"Error recommending techniques: {str(e)}")
             return []
 
     def extract_relevant_techniques(self, rule_description: str, probable_techniques: List[Dict], 
@@ -347,12 +381,13 @@ REASONING: [your detailed reasoning for the score]"""
     def generate_detailed_incident_response(self, rule_description: str, mitre_techniques: List[TechniqueResult], siem_rule: str) -> Dict[str, Any]:
         """Generate detailed incident response plan following the template structure"""
         siem_platform = self.identify_siem_platform(siem_rule)
-        top_technique = mitre_techniques[0] if mitre_techniques else None
+        top_technique = mitre_techniques[0] if mitre_techniques and len(mitre_techniques) > 0 else None
         
+        # Safely generate techniques summary
         techniques_summary = "\n".join([
             f"- {t.id}: {t.name} (Confidence: {t.confidence:.2f})"
-            for t in mitre_techniques[:3]
-        ])
+            for t in (mitre_techniques[:3] if mitre_techniques else [])
+        ]) if mitre_techniques else "No specific techniques identified"
         
         prompt = f"""You are a senior SOC analyst creating a detailed incident response playbook following the standard 4-step investigation procedure.
 
@@ -438,20 +473,27 @@ Return only the JSON object with detailed, actionable steps:"""
         
         try:
             response_text = self._call_claude(prompt, max_tokens=4096, temperature=0.2)
+            if not response_text:
+                return {}
+                
             json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
             if json_match:
                 return json.loads(json_match.group())
             return {}
+        except json.JSONDecodeError as e:
+            st.warning(f"JSON parsing error in incident response generation: {str(e)}")
+            return {}
         except Exception as e:
-            st.error(f"Error generating incident response plan: {str(e)}")
+            st.warning(f"Error generating incident response plan: {str(e)}")
             return {}
 
     def generate_soar_workflow(self, rule_description: str, mitre_techniques: List[TechniqueResult]) -> Dict[str, Any]:
         """Generate visual SOAR workflow with Graphviz diagram using Claude Haiku"""
+        # Safely generate techniques summary
         techniques_summary = "\n".join([
             f"- {t.id}: {t.name}"
-            for t in mitre_techniques[:3]
-        ])
+            for t in (mitre_techniques[:3] if mitre_techniques else [])
+        ]) if mitre_techniques else "No specific techniques identified"
         
         # Use Claude Haiku specifically for SOAR workflow generation
         haiku_model = "claude-3-5-haiku-20241022"
@@ -557,6 +599,9 @@ Return only the JSON object:"""
             )
             response_text = response.content[0].text
             
+            if not response_text:
+                return {'workflow_steps': [], 'graphviz_dot': ''}
+            
             json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
             if json_match:
                 workflow_data = json.loads(json_match.group())
@@ -564,43 +609,93 @@ Return only the JSON object:"""
                 # Convert workflow steps to SOARWorkflowStep objects
                 workflow_steps = []
                 for step in workflow_data.get('workflow_steps', []):
-                    workflow_steps.append(SOARWorkflowStep(
-                        step_id=step.get('step_id', ''),
-                        name=step.get('name', ''),
-                        type=step.get('type', ''),
-                        description=step.get('description', ''),
-                        responsible_team=step.get('responsible_team', ''),
-                        inputs=step.get('inputs', []),
-                        outputs=step.get('outputs', []),
-                        next_steps=step.get('next_steps', [])
-                    ))
+                    if isinstance(step, dict):  # Ensure step is a dictionary
+                        workflow_steps.append(SOARWorkflowStep(
+                            step_id=step.get('step_id', ''),
+                            name=step.get('name', ''),
+                            type=step.get('type', ''),
+                            description=step.get('description', ''),
+                            responsible_team=step.get('responsible_team', ''),
+                            inputs=step.get('inputs', []) if isinstance(step.get('inputs'), list) else [],
+                            outputs=step.get('outputs', []) if isinstance(step.get('outputs'), list) else [],
+                            next_steps=step.get('next_steps', []) if isinstance(step.get('next_steps'), list) else []
+                        ))
                 
                 return {
                     'workflow_steps': workflow_steps,
                     'graphviz_dot': workflow_data.get('graphviz_dot', '')
                 }
             return {'workflow_steps': [], 'graphviz_dot': ''}
+        except json.JSONDecodeError as e:
+            st.warning(f"JSON parsing error in SOAR workflow generation: {str(e)}")
+            return {'workflow_steps': [], 'graphviz_dot': ''}
         except Exception as e:
-            st.error(f"Error generating SOAR workflow: {str(e)}")
+            st.warning(f"Error generating SOAR workflow: {str(e)}")
             return {'workflow_steps': [], 'graphviz_dot': ''}
 
     def run_complete_analysis(self, siem_rule: str, confidence_threshold: float = 0.7) -> Dict[str, Any]:
-        """Run complete analysis pipeline"""
+        """Run complete analysis pipeline with improved error handling"""
         results = {}
         
         try:
-            # MITRE mapping
-            iocs = self.extract_iocs(siem_rule)
-            context_info = self.retrieve_contextual_info(iocs)
-            rule_description = self.translate_to_natural_language(siem_rule, iocs, context_info)
-            probable_techniques = self.recommend_probable_techniques(rule_description)
-            relevant_techniques = self.extract_relevant_techniques(rule_description, probable_techniques, confidence_threshold)
+            # Step 1: Extract IoCs
+            try:
+                iocs = self.extract_iocs(siem_rule)
+                if not iocs:
+                    iocs = {}
+            except Exception as e:
+                st.warning(f"IoC extraction failed: {str(e)}")
+                iocs = {}
             
-            # Incident response plan
-            incident_plan = self.generate_detailed_incident_response(rule_description, relevant_techniques, siem_rule)
+            # Step 2: Retrieve contextual information
+            try:
+                context_info = self.retrieve_contextual_info(iocs)
+            except Exception as e:
+                st.warning(f"Context retrieval failed: {str(e)}")
+                context_info = {}
             
-            # SOAR workflow
-            soar_data = self.generate_soar_workflow(rule_description, relevant_techniques)
+            # Step 3: Translate to natural language
+            try:
+                rule_description = self.translate_to_natural_language(siem_rule, iocs, context_info)
+                if not rule_description:
+                    rule_description = f"SIEM detection rule for monitoring security events: {siem_rule[:100]}..."
+            except Exception as e:
+                st.warning(f"Rule translation failed: {str(e)}")
+                rule_description = f"SIEM detection rule for monitoring security events: {siem_rule[:100]}..."
+            
+            # Step 4: Recommend techniques
+            try:
+                probable_techniques = self.recommend_probable_techniques(rule_description)
+                if not probable_techniques:
+                    probable_techniques = []
+            except Exception as e:
+                st.warning(f"Technique recommendation failed: {str(e)}")
+                probable_techniques = []
+            
+            # Step 5: Extract relevant techniques
+            try:
+                relevant_techniques = self.extract_relevant_techniques(rule_description, probable_techniques, confidence_threshold)
+            except Exception as e:
+                st.warning(f"Technique extraction failed: {str(e)}")
+                relevant_techniques = []
+            
+            # Step 6: Generate incident response plan
+            try:
+                incident_plan = self.generate_detailed_incident_response(rule_description, relevant_techniques, siem_rule)
+                if not incident_plan:
+                    incident_plan = {}
+            except Exception as e:
+                st.warning(f"Incident response generation failed: {str(e)}")
+                incident_plan = {}
+            
+            # Step 7: Generate SOAR workflow
+            try:
+                soar_data = self.generate_soar_workflow(rule_description, relevant_techniques)
+                if not soar_data:
+                    soar_data = {'workflow_steps': [], 'graphviz_dot': ''}
+            except Exception as e:
+                st.warning(f"SOAR workflow generation failed: {str(e)}")
+                soar_data = {'workflow_steps': [], 'graphviz_dot': ''}
             
             results = {
                 'rule_description': rule_description,
@@ -616,7 +711,7 @@ Return only the JSON object:"""
             return results
             
         except Exception as e:
-            st.error(f"Analysis failed: {str(e)}")
+            st.error(f"Analysis pipeline failed: {str(e)}")
             return results
 
 # Settings Modal
@@ -770,12 +865,13 @@ def display_mitre_mapping_page():
         
         # Rule Description
         st.markdown("### 📝 Rule Description")
-        st.info(results['rule_description'])
+        rule_desc = results.get('rule_description', 'No description available')
+        st.info(rule_desc)
         
         # MITRE ATT&CK Techniques
         st.markdown("### 🎯 MITRE ATT&CK Techniques")
         
-        if results['relevant_techniques']:
+        if results['relevant_techniques'] and len(results['relevant_techniques']) > 0:
             cols = st.columns(2)
             for i, technique in enumerate(results['relevant_techniques'][:4]):
                 with cols[i % 2]:
@@ -783,22 +879,25 @@ def display_mitre_mapping_page():
                     <div class="technique-card">
                         <h4>{technique.id} - {technique.name}</h4>
                         <p><strong>Confidence:</strong> {technique.confidence:.2f}</p>
-                        <p>{technique.description[:150]}...</p>
+                        <p>{technique.description[:150] if technique.description else 'No description available'}...</p>
                     </div>
                     """, unsafe_allow_html=True)
         else:
-            st.warning("No relevant techniques found.")
+            st.warning("No relevant techniques found above the confidence threshold.")
         
         # Analysis Summary
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("🎯 Techniques Found", len(results['relevant_techniques']))
+            st.metric("🎯 Techniques Found", len(results.get('relevant_techniques', [])))
         with col2:
-            if results['relevant_techniques']:
-                avg_confidence = sum(t.confidence for t in results['relevant_techniques']) / len(results['relevant_techniques'])
+            relevant_techniques = results.get('relevant_techniques', [])
+            if relevant_techniques and len(relevant_techniques) > 0:
+                avg_confidence = sum(t.confidence for t in relevant_techniques) / len(relevant_techniques)
                 st.metric("📊 Avg Confidence", f"{avg_confidence:.2f}")
+            else:
+                st.metric("📊 Avg Confidence", "N/A")
         with col3:
-            st.metric("🖥️ SIEM Platform", results['siem_platform'])
+            st.metric("🖥️ SIEM Platform", results.get('siem_platform', 'Unknown'))
 
 def display_incident_response_page():
     """Enhanced incident response page"""
@@ -955,13 +1054,13 @@ def display_soar_workflow_page():
     # Workflow Metrics
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        automated_steps = sum(1 for step in workflow if step.type == 'automated')
+        automated_steps = sum(1 for step in workflow if hasattr(step, 'type') and step.type == 'automated')
         st.metric("🤖 Automated", automated_steps)
     with col2:
-        manual_steps = sum(1 for step in workflow if step.type == 'manual')
+        manual_steps = sum(1 for step in workflow if hasattr(step, 'type') and step.type == 'manual')
         st.metric("👤 Manual", manual_steps)
     with col3:
-        decision_steps = sum(1 for step in workflow if step.type == 'decision')
+        decision_steps = sum(1 for step in workflow if hasattr(step, 'type') and step.type == 'decision')
         st.metric("🤔 Decisions", decision_steps)
     with col4:
         st.metric("📋 Total Steps", len(workflow))
@@ -994,24 +1093,27 @@ def display_soar_workflow_page():
     st.markdown("### 📋 Detailed Workflow Steps")
     
     for i, step in enumerate(workflow):
+        if not hasattr(step, 'type') or not hasattr(step, 'step_id') or not hasattr(step, 'name'):
+            continue  # Skip malformed steps
+            
         type_emoji = {"automated": "🤖", "manual": "👤", "decision": "🤔"}.get(step.type, "📋")
         
         with st.expander(f"{type_emoji} {step.step_id}: {step.name}", expanded=(i<3)):
-            st.write(f"**Description:** {step.description}")
-            st.write(f"**Responsible Team:** {step.responsible_team}")
-            st.write(f"**Type:** {step.type.title()}")
+            st.write(f"**Description:** {getattr(step, 'description', 'No description available')}")
+            st.write(f"**Responsible Team:** {getattr(step, 'responsible_team', 'Unknown')}")
+            st.write(f"**Type:** {step.type.title() if hasattr(step, 'type') else 'Unknown'}")
             
-            if step.inputs:
+            if hasattr(step, 'inputs') and step.inputs:
                 st.write("**Required Inputs:**")
                 for inp in step.inputs:
                     st.write(f"• {inp}")
             
-            if step.outputs:
+            if hasattr(step, 'outputs') and step.outputs:
                 st.write("**Expected Outputs:**")
                 for out in step.outputs:
                     st.write(f"• {out}")
             
-            if step.next_steps:
+            if hasattr(step, 'next_steps') and step.next_steps:
                 st.write(f"**Next Steps:** {', '.join(step.next_steps)}")
     
     # Export Options
@@ -1021,14 +1123,14 @@ def display_soar_workflow_page():
     
     with col1:
         workflow_json = json.dumps([{
-            'step_id': step.step_id,
-            'name': step.name,
-            'type': step.type,
-            'description': step.description,
-            'responsible_team': step.responsible_team,
-            'inputs': step.inputs,
-            'outputs': step.outputs,
-            'next_steps': step.next_steps
+            'step_id': getattr(step, 'step_id', ''),
+            'name': getattr(step, 'name', ''),
+            'type': getattr(step, 'type', ''),
+            'description': getattr(step, 'description', ''),
+            'responsible_team': getattr(step, 'responsible_team', ''),
+            'inputs': getattr(step, 'inputs', []),
+            'outputs': getattr(step, 'outputs', []),
+            'next_steps': getattr(step, 'next_steps', [])
         } for step in workflow], indent=2)
         
         st.download_button(
@@ -1053,9 +1155,10 @@ def display_soar_workflow_page():
     with col3:
         checklist = "# SOAR Workflow Checklist\n\n"
         for step in workflow:
-            type_emoji = {"automated": "🤖", "manual": "👤", "decision": "🤔"}.get(step.type, "📋")
-            checklist += f"- [ ] **{step.step_id}** - {step.name} {type_emoji}\n"
-            checklist += f"  - **Team:** {step.responsible_team}\n\n"
+            if hasattr(step, 'type') and hasattr(step, 'step_id') and hasattr(step, 'name'):
+                type_emoji = {"automated": "🤖", "manual": "👤", "decision": "🤔"}.get(step.type, "📋")
+                checklist += f"- [ ] **{step.step_id}** - {step.name} {type_emoji}\n"
+                checklist += f"  - **Team:** {getattr(step, 'responsible_team', 'Unknown')}\n\n"
         
         st.download_button(
             label="📋 Download Checklist",
@@ -1082,9 +1185,22 @@ def main():
         
         # Status
         if st.session_state.get('analysis_results'):
-            st.success("✅ Analysis Complete")
-            
             results = st.session_state['analysis_results']
+            
+            # Check for partial results
+            has_techniques = results.get('relevant_techniques') and len(results.get('relevant_techniques', [])) > 0
+            has_incident_plan = results.get('incident_plan') and len(results.get('incident_plan', {})) > 0
+            has_soar = results.get('soar_workflow') and len(results.get('soar_workflow', [])) > 0
+            
+            if has_techniques and has_incident_plan and has_soar:
+                st.success("✅ Analysis Complete")
+            elif has_techniques:
+                st.warning("⚠️ Partial Analysis")
+                st.info("Some components may be incomplete")
+            else:
+                st.error("❌ Analysis Issues")
+                st.info("Please try again")
+            
             st.info(f"🖥️ Platform: {results.get('siem_platform', 'Unknown')}")
             st.info(f"🎯 Techniques: {len(results.get('relevant_techniques', []))}")
         else:
