@@ -127,34 +127,85 @@ class SOARWorkflowStep:
 
 class CybersecurityResponsePlatform:
     def __init__(self, api_key: str, model_name: str = "claude-3-5-haiku-20241022"):
-        """Initialize platform with Claude API"""
+        """Initialize platform with Claude API - compatible with all Claude versions"""
         self.client = anthropic.Anthropic(api_key=api_key)
         self.model_name = model_name
+        self.model_info = get_model_info(model_name)
         
-        # Test the API connection
+        # Test the API connection with minimal token usage
         try:
             test_response = self.client.messages.create(
                 model=model_name,
-                max_tokens=10,
-                messages=[{"role": "user", "content": "Test"}]
+                max_tokens=5,
+                messages=[{"role": "user", "content": "Hi"}]
             )
+            st.success(f"✅ Connected to {self.model_info.get('family', model_name)}")
         except Exception as e:
-            st.error(f"Failed to connect to Claude API: {str(e)}")
+            error_msg = str(e)
+            if "model" in error_msg.lower():
+                st.error(f"❌ Model '{model_name}' not available. Please check the model name or your API access.")
+            else:
+                st.error(f"❌ Failed to connect to Claude API: {error_msg}")
             st.stop()
     
     def _call_claude(self, prompt: str, max_tokens: int = 2048, temperature: float = 0.1) -> str:
-        """Helper method to call Claude API with consistent parameters"""
+        """Enhanced Claude API call with adaptive parameters for different model versions"""
         try:
+            # Adaptive max_tokens based on model capability
+            adjusted_max_tokens = self._adjust_max_tokens(max_tokens)
+            
             response = self.client.messages.create(
                 model=self.model_name,
-                max_tokens=max_tokens,
+                max_tokens=adjusted_max_tokens,
                 temperature=temperature,
                 messages=[{"role": "user", "content": prompt}]
             )
             return response.content[0].text
         except Exception as e:
-            st.error(f"Error calling Claude API: {str(e)}")
+            error_msg = str(e)
+            if "rate_limit" in error_msg.lower():
+                st.warning(f"Rate limit reached for {self.model_name}. Please wait a moment and try again.")
+            elif "tokens" in error_msg.lower():
+                st.warning(f"Token limit exceeded. Trying with reduced parameters...")
+                # Retry with smaller token limit
+                try:
+                    response = self.client.messages.create(
+                        model=self.model_name,
+                        max_tokens=min(1000, adjusted_max_tokens),
+                        temperature=temperature,
+                        messages=[{"role": "user", "content": prompt}]
+                    )
+                    return response.content[0].text
+                except:
+                    pass
+            st.error(f"Error calling Claude API: {error_msg}")
             return ""
+    
+    def _adjust_max_tokens(self, requested_tokens: int) -> int:
+        """Adjust max_tokens based on model capabilities"""
+        # Claude 4 models typically support higher token limits
+        if "claude-4" in self.model_name or "claude-sonnet-4" in self.model_name or "claude-opus-4" in self.model_name:
+            return min(requested_tokens, 8192)  # Higher limit for Claude 4
+        # Claude 3.5 models
+        elif "3-5" in self.model_name or "3.5" in self.model_name:
+            return min(requested_tokens, 4096)
+        # Claude 3 models (legacy)
+        elif "claude-3" in self.model_name:
+            return min(requested_tokens, 4096)
+        # Unknown/custom models - conservative approach
+        else:
+            return min(requested_tokens, 2048)
+    
+    def _get_optimal_delay(self) -> float:
+        """Get optimal delay between API calls based on model type"""
+        if "haiku" in self.model_name.lower():
+            return 0.1  # Haiku is faster
+        elif "sonnet" in self.model_name.lower():
+            return 0.2  # Sonnet is balanced
+        elif "opus" in self.model_name.lower():
+            return 0.3  # Opus is more thorough
+        else:
+            return 0.2  # Default for unknown models
 
     def extract_iocs(self, siem_rule: str) -> Dict[str, List[str]]:
         """Step 1: Extract IoCs from SIEM rule with improved error handling"""
@@ -215,9 +266,9 @@ Return only the JSON dictionary, no other text."""
             return f"Cybersecurity indicator: {query}"
 
     def retrieve_contextual_info(self, iocs_dict: Dict[str, List[str]]) -> Dict[str, str]:
-        """Step 2: Retrieve contextual information for IoCs"""
+        """Step 2: Retrieve contextual information for IoCs with adaptive delays"""
         context_info = {}
-        delay = 0.2 if "haiku" in self.model_name.lower() else 0.3
+        delay = self._get_optimal_delay()
         
         # Handle case where iocs_dict might be None or empty
         if not iocs_dict:
@@ -271,7 +322,7 @@ Provide a clear, natural language explanation of what this rule detects:"""
         
         # SIEM platform detection patterns
         siem_patterns = {
-            "Splunk": ["index=", "sourcetype=", "| search", "| stats", "| eval", "| where"],
+            "Splunk": ["index=", "sourcetype=", "| search", "| stats", "| eval", "| where", "| tstats"],
             "Microsoft Sentinel": ["securityevent", "signinlogs", "auditlogs", "| where", "| summarize", "kusto"],
             "Google Chronicle": ["metadata.event_type", "principal.hostname", "target.hostname", "udm."],
             "IBM QRadar": ["select", "from events", "where", "group by", "order by", "last"],
@@ -287,7 +338,7 @@ Provide a clear, natural language explanation of what this rule detects:"""
         
         return "Generic SIEM"
 
-    def recommend_probable_techniques(self, rule_description: str, k: int = 11) -> List[Dict]:
+    def recommend_probable_techniques(self, rule_description: str, k: int = 8) -> List[Dict]:
         """Step 5: Recommend probable MITRE ATT&CK techniques with improved error handling"""
         prompt = f"""You are a cybersecurity expert mapping SIEM rules to MITRE ATT&CK techniques.
 
@@ -298,6 +349,7 @@ Guidelines:
 - Each object should have: "id", "name", "description", "tactic"
 - Use real MITRE ATT&CK technique IDs (like T1055, T1003.001, etc.)
 - Prioritize techniques that match the specific behaviors described
+- Focus on the most relevant and accurate mappings
 
 Rule Description:
 {rule_description}
@@ -327,7 +379,7 @@ Return only the JSON array, no other text:"""
 
     def extract_relevant_techniques(self, rule_description: str, probable_techniques: List[Dict], 
                                   confidence_threshold: float = 0.7) -> List[TechniqueResult]:
-        """Step 6: Extract most relevant techniques with confidence scoring"""
+        """Step 6: Extract top 3 most relevant techniques with confidence scoring"""
         relevant_techniques = []
         
         for technique in probable_techniques:
@@ -336,10 +388,10 @@ Return only the JSON array, no other text:"""
 Your task is to analyze how well the SIEM rule matches the attack technique. Provide a confidence score (0.0 to 1.0) and reasoning.
 
 Scoring Guidelines: 
-- Score 0.9-1.0: Perfect match
-- Score 0.7-0.9: Good match
-- Score 0.5-0.7: Moderate match
-- Score 0.0-0.5: Poor match
+- Score 0.9-1.0: Perfect match - technique directly detected by this rule
+- Score 0.7-0.9: Good match - technique likely detected with some variations
+- Score 0.5-0.7: Moderate match - technique partially detected
+- Score 0.0-0.5: Poor match - unlikely to detect this technique
 
 Rule Description:
 {rule_description}
@@ -375,19 +427,23 @@ REASONING: [your detailed reasoning for the score]"""
                 st.warning(f"Error processing technique {technique.get('id', 'Unknown')}: {str(e)}")
                 continue
         
+        # Sort by confidence and return only top 3 most relevant
         relevant_techniques.sort(key=lambda x: x.confidence, reverse=True)
-        return relevant_techniques
+        return relevant_techniques[:3]  # Return only top 3 most relevant techniques
 
     def generate_detailed_incident_response(self, rule_description: str, mitre_techniques: List[TechniqueResult], siem_rule: str) -> Dict[str, Any]:
         """Generate detailed incident response plan following the template structure"""
         siem_platform = self.identify_siem_platform(siem_rule)
         top_technique = mitre_techniques[0] if mitre_techniques and len(mitre_techniques) > 0 else None
         
-        # Safely generate techniques summary
-        techniques_summary = "\n".join([
-            f"- {t.id}: {t.name} (Confidence: {t.confidence:.2f})"
-            for t in (mitre_techniques[:3] if mitre_techniques else [])
-        ]) if mitre_techniques else "No specific techniques identified"
+        # Generate techniques summary for top 3 techniques
+        if mitre_techniques:
+            techniques_summary = "\n".join([
+                f"- {t.id}: {t.name} (Confidence: {t.confidence:.2f})"
+                for t in mitre_techniques  # Already limited to top 3 in extract_relevant_techniques
+            ])
+        else:
+            techniques_summary = "No specific techniques identified"
         
         prompt = f"""You are a senior SOC analyst creating a detailed incident response playbook following the standard 4-step investigation procedure.
 
@@ -488,15 +544,18 @@ Return only the JSON object with detailed, actionable steps:"""
             return {}
 
     def generate_soar_workflow(self, rule_description: str, mitre_techniques: List[TechniqueResult]) -> Dict[str, Any]:
-        """Generate visual SOAR workflow with Graphviz diagram using Claude Haiku"""
-        # Safely generate techniques summary
-        techniques_summary = "\n".join([
-            f"- {t.id}: {t.name}"
-            for t in (mitre_techniques[:3] if mitre_techniques else [])
-        ]) if mitre_techniques else "No specific techniques identified"
+        """Generate visual SOAR workflow with Graphviz diagram using selected Claude model"""
+        # Generate techniques summary for all available techniques (already top 3)
+        if mitre_techniques:
+            techniques_summary = "\n".join([
+                f"- {t.id}: {t.name}"
+                for t in mitre_techniques  # Already limited to top 3 most relevant
+            ])
+        else:
+            techniques_summary = "No specific techniques identified"
         
-        # Use Claude Haiku specifically for SOAR workflow generation
-        haiku_model = "claude-3-5-haiku-20241022"
+        # Use the selected model for SOAR workflow generation
+        current_model = self.model_name
         
         prompt = f"""You are a SOAR architect designing a visual workflow from alert to resolution.
 
@@ -590,10 +649,10 @@ Create a similar structure but generate the actual graphviz DOT notation for the
 Return only the JSON object:"""
         
         try:
-            # Use Haiku specifically for SOAR workflow
+            # Use the current model for SOAR workflow generation
             response = self.client.messages.create(
-                model=haiku_model,
-                max_tokens=4096,
+                model=current_model,
+                max_tokens=self._adjust_max_tokens(4096),
                 temperature=0.2,
                 messages=[{"role": "user", "content": prompt}]
             )
@@ -705,7 +764,8 @@ Return only the JSON object:"""
                 'incident_plan': incident_plan,
                 'soar_workflow': soar_data.get('workflow_steps', []),
                 'soar_graphviz': soar_data.get('graphviz_dot', ''),
-                'siem_platform': incident_plan.get('siem_platform', 'Unknown')
+                'siem_platform': incident_plan.get('siem_platform', 'Unknown'),
+                'model_used': self.model_info.get('family', self.model_name)
             }
             
             return results
@@ -716,7 +776,7 @@ Return only the JSON object:"""
 
 # Settings Modal
 def show_settings_modal():
-    """Display settings modal"""
+    """Display settings modal with comprehensive Claude model support"""
     with st.expander("⚙️ Configuration Settings", expanded=False):
         col1, col2 = st.columns(2)
         
@@ -738,19 +798,60 @@ def show_settings_modal():
                     st.success("✅ API Key configured")
         
         with col2:
-            # Model selection
+            # Comprehensive model selection with all Claude versions
             model_options = {
+                # Claude 4 Models (Latest)
+                "Claude 4 Sonnet (Latest)": "claude-sonnet-4-20250514",
+                "Claude 4 Opus (Most Capable)": "claude-opus-4-20250514",
+                
+                # Claude 3.5 Models
+                "Claude 3.5 Sonnet (Balanced)": "claude-3-5-sonnet-20241022",
                 "Claude 3.5 Haiku (Fast)": "claude-3-5-haiku-20241022",
-                "Claude 3.5 Sonnet (Accurate)": "claude-3-5-sonnet-20241022", 
+                
+                # Claude 3 Models (Legacy Support)
+                "Claude 3 Opus (Legacy)": "claude-3-opus-20240229",
+                "Claude 3 Sonnet (Legacy)": "claude-3-sonnet-20240229",
+                "Claude 3 Haiku (Legacy)": "claude-3-haiku-20240307",
+                
+                # Custom Model Entry
+                "Custom Model": "custom"
             }
             
             selected_model_display = st.selectbox(
-                "🤖 Model Selection",
+                "🤖 Claude Model Selection",
                 options=list(model_options.keys()),
-                index=0,
-                help="Haiku is fastest for structured analysis tasks"
+                index=0,  # Default to Claude 4 Sonnet
+                help="Choose your Claude model. Newer models offer better performance."
             )
-            selected_model = model_options[selected_model_display]
+            
+            # Handle custom model input
+            if selected_model_display == "Custom Model":
+                selected_model = st.text_input(
+                    "Enter Model Name:",
+                    placeholder="claude-sonnet-4-20250514",
+                    help="Enter the exact model name from Anthropic's API documentation"
+                )
+                if not selected_model:
+                    selected_model = "claude-3-5-haiku-20241022"  # Fallback
+            else:
+                selected_model = model_options[selected_model_display]
+            
+            # Model info display
+            model_info = get_model_info(selected_model)
+            if model_info:
+                st.info(f"**{model_info['family']}** | {model_info['description']}")
+            
+            # Model performance info
+            if selected_model_display != "Custom Model":
+                model_category = model_info.get('category', 'unknown')
+                if model_category == 'fast':
+                    st.success("⚡ **Fast Analysis** - Optimized for speed and efficiency")
+                elif model_category == 'balanced':
+                    st.info("⚖️ **Balanced Performance** - Great mix of speed and accuracy")
+                elif model_category == 'premium':
+                    st.warning("🎯 **Premium Analysis** - Highest accuracy, may take longer")
+                elif model_category == 'legacy':
+                    st.info("📚 **Legacy Model** - Stable but may have limited features")
             
             confidence_threshold = st.slider(
                 "Confidence Threshold",
@@ -763,6 +864,57 @@ def show_settings_modal():
         
         return api_key, selected_model, confidence_threshold
 
+def get_model_info(model_name: str) -> dict:
+    """Get information about the selected Claude model"""
+    model_info_map = {
+        # Claude 4 Models
+        "claude-sonnet-4-20250514": {
+            "family": "Claude 4 Sonnet",
+            "description": "Latest balanced model with enhanced reasoning",
+            "category": "balanced"
+        },
+        "claude-opus-4-20250514": {
+            "family": "Claude 4 Opus", 
+            "description": "Most capable model for complex analysis",
+            "category": "premium"
+        },
+        
+        # Claude 3.5 Models
+        "claude-3-5-sonnet-20241022": {
+            "family": "Claude 3.5 Sonnet",
+            "description": "Balanced performance and speed",
+            "category": "balanced"
+        },
+        "claude-3-5-haiku-20241022": {
+            "family": "Claude 3.5 Haiku",
+            "description": "Fast and efficient for structured tasks",
+            "category": "fast"
+        },
+        
+        # Claude 3 Models
+        "claude-3-opus-20240229": {
+            "family": "Claude 3 Opus",
+            "description": "Legacy high-capability model",
+            "category": "legacy"
+        },
+        "claude-3-sonnet-20240229": {
+            "family": "Claude 3 Sonnet",
+            "description": "Legacy balanced model",
+            "category": "legacy"
+        },
+        "claude-3-haiku-20240307": {
+            "family": "Claude 3 Haiku",
+            "description": "Legacy fast model",
+            "category": "legacy"
+        }
+    }
+    
+    return model_info_map.get(model_name, {
+        "family": "Custom Model",
+        "description": "User-defined model",
+        "category": "custom"
+    })
+
 # Main Pages
 def display_mitre_mapping_page():
     """Modern MITRE mapping page"""
@@ -771,6 +923,7 @@ def display_mitre_mapping_page():
     <div class="main-header">
         <h1>🛡️ Cybersecurity Response Platform</h1>
         <p>Advanced SIEM Rule Analysis & MITRE ATT&CK Mapping</p>
+        <p style="font-size: 0.9em; opacity: 0.8;">✨ Compatible with all Claude models including Claude 4 Sonnet & Opus</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -819,6 +972,11 @@ def display_mitre_mapping_page():
             if st.button("🔄 Clear Results", use_container_width=True):
                 del st.session_state['analysis_results']
                 st.rerun()
+        else:
+            model_info = get_model_info(selected_model)
+            st.info(f"🤖 **Ready with:** {model_info.get('family', selected_model)}")
+            if confidence_threshold != 0.7:
+                st.info(f"🎯 **Threshold:** {confidence_threshold}")
     
     # Process analysis
     if analyze_button and siem_rule.strip():
@@ -869,35 +1027,188 @@ def display_mitre_mapping_page():
         st.info(rule_desc)
         
         # MITRE ATT&CK Techniques
-        st.markdown("### 🎯 MITRE ATT&CK Techniques")
+        st.markdown("### 🎯 Top 3 Most Relevant MITRE ATT&CK Techniques")
         
         if results['relevant_techniques'] and len(results['relevant_techniques']) > 0:
-            cols = st.columns(2)
-            for i, technique in enumerate(results['relevant_techniques'][:4]):
-                with cols[i % 2]:
+            # Display exactly 3 techniques in a clean layout
+            techniques_to_show = results['relevant_techniques'][:3]
+            
+            if len(techniques_to_show) == 1:
+                # Single technique - full width
+                st.markdown(f"""
+                <div class="technique-card">
+                    <h4>🥇 #{1} - {techniques_to_show[0].id}: {techniques_to_show[0].name}</h4>
+                    <p><strong>Confidence:</strong> {techniques_to_show[0].confidence:.2f} ({get_confidence_label(techniques_to_show[0].confidence)})</p>
+                    <p>{techniques_to_show[0].description[:200] if techniques_to_show[0].description else 'No description available'}...</p>
+                    <p><strong>Analysis:</strong> {techniques_to_show[0].reasoning[:150]}...</p>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            elif len(techniques_to_show) == 2:
+                # Two techniques - split in 2 columns
+                col1, col2 = st.columns(2)
+                medals = ["🥇", "🥈"]
+                for i, (col, technique) in enumerate(zip([col1, col2], techniques_to_show)):
+                    with col:
+                        st.markdown(f"""
+                        <div class="technique-card">
+                            <h4>{medals[i]} #{i+1} - {technique.id}: {technique.name}</h4>
+                            <p><strong>Confidence:</strong> {technique.confidence:.2f} ({get_confidence_label(technique.confidence)})</p>
+                            <p>{technique.description[:150] if technique.description else 'No description available'}...</p>
+                            <p><strong>Analysis:</strong> {technique.reasoning[:100]}...</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+            
+            else:
+                # Three techniques - split in 3 columns
+                col1, col2, col3 = st.columns(3)
+                medals = ["🥇", "🥈", "🥉"]
+                for i, (col, technique) in enumerate(zip([col1, col2, col3], techniques_to_show)):
+                    with col:
+                        st.markdown(f"""
+                        <div class="technique-card">
+                            <h4>{medals[i]} #{i+1} - {technique.id}</h4>
+                            <h5>{technique.name}</h5>
+                            <p><strong>Confidence:</strong> {technique.confidence:.2f}</p>
+                            <p><strong>Level:</strong> {get_confidence_label(technique.confidence)}</p>
+                            <p style="font-size: 0.85em;">{technique.description[:120] if technique.description else 'No description available'}...</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+            
+            # Expandable detailed analysis for each technique
+            st.markdown("#### 📋 Detailed Analysis")
+            for i, technique in enumerate(techniques_to_show):
+                medal = ["🥇", "🥈", "🥉"][i]
+                with st.expander(f"{medal} **{technique.id} - {technique.name}** (Confidence: {technique.confidence:.2f})", expanded=(i==0)):
+                    st.write(f"**Full Description:** {technique.description}")
+                    st.write(f"**Confidence Score:** {technique.confidence:.3f} - {get_confidence_label(technique.confidence)}")
+                    st.write(f"**Detailed Reasoning:** {technique.reasoning}")
+                    
+                    # Confidence progress bar
+                    confidence_color = get_confidence_color(technique.confidence)
                     st.markdown(f"""
-                    <div class="technique-card">
-                        <h4>{technique.id} - {technique.name}</h4>
-                        <p><strong>Confidence:</strong> {technique.confidence:.2f}</p>
-                        <p>{technique.description[:150] if technique.description else 'No description available'}...</p>
+                    <div style="background-color: #f0f0f0; border-radius: 10px; padding: 2px;">
+                        <div style="background-color: {confidence_color}; width: {technique.confidence*100}%; height: 20px; border-radius: 8px; text-align: center; line-height: 20px; color: white; font-weight: bold;">
+                            {technique.confidence:.1%}
+                        </div>
                     </div>
                     """, unsafe_allow_html=True)
         else:
             st.warning("No relevant techniques found above the confidence threshold.")
+            st.info("💡 **Tip:** Try lowering the confidence threshold in settings or use a different Claude model for better analysis.")
         
         # Analysis Summary
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("🎯 Techniques Found", len(results.get('relevant_techniques', [])))
+            st.metric("🎯 Top Techniques", min(3, len(results.get('relevant_techniques', []))))
         with col2:
             relevant_techniques = results.get('relevant_techniques', [])
             if relevant_techniques and len(relevant_techniques) > 0:
-                avg_confidence = sum(t.confidence for t in relevant_techniques) / len(relevant_techniques)
+                avg_confidence = sum(t.confidence for t in relevant_techniques[:3]) / min(3, len(relevant_techniques))
                 st.metric("📊 Avg Confidence", f"{avg_confidence:.2f}")
             else:
                 st.metric("📊 Avg Confidence", "N/A")
         with col3:
             st.metric("🖥️ SIEM Platform", results.get('siem_platform', 'Unknown'))
+        
+        # Top 3 Summary Insight
+        if results.get('relevant_techniques'):
+            st.markdown("---")
+            st.markdown("### 📈 Analysis Insights")
+            
+            techniques = results['relevant_techniques'][:3]
+            top_confidence = techniques[0].confidence if techniques else 0
+            
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                if top_confidence >= 0.9:
+                    st.success(f"🎯 **Excellent Detection Coverage** - The top technique ({techniques[0].id}) has {top_confidence:.1%} confidence, indicating this SIEM rule provides excellent coverage for the identified attack patterns.")
+                elif top_confidence >= 0.8:
+                    st.info(f"✅ **Good Detection Coverage** - The analysis shows {top_confidence:.1%} confidence for the primary technique ({techniques[0].id}), suggesting reliable detection capabilities.")
+                elif top_confidence >= 0.7:
+                    st.warning(f"⚠️ **Moderate Detection Coverage** - Primary technique confidence is {top_confidence:.1%}. Consider refining the SIEM rule for better detection accuracy.")
+                else:
+                    st.error(f"🔍 **Low Detection Coverage** - The highest confidence is only {top_confidence:.1%}. This rule may need significant improvements.")
+                
+                # Technique diversity insight
+                if len(techniques) >= 3:
+                    confidence_range = techniques[0].confidence - techniques[2].confidence
+                    if confidence_range <= 0.1:
+                        st.info("🔄 **Consistent Mapping** - All top 3 techniques have similar confidence levels, indicating focused detection scope.")
+                    else:
+                        st.info("📊 **Varied Mapping** - Confidence scores vary across techniques, suggesting diverse attack pattern coverage.")
+            
+            with col2:
+                # Quick stats
+                st.markdown("**🎯 Detection Quality**")
+                quality_score = sum(t.confidence for t in techniques) / len(techniques)
+                if quality_score >= 0.85:
+                    st.success(f"Excellent: {quality_score:.2f}")
+                elif quality_score >= 0.75:
+                    st.info(f"Good: {quality_score:.2f}")
+                elif quality_score >= 0.65:
+                    st.warning(f"Fair: {quality_score:.2f}")
+                else:
+                    st.error(f"Poor: {quality_score:.2f}")
+                
+                st.markdown(f"**🏆 Best Match:** {techniques[0].id}")
+                st.markdown(f"**📊 Confidence:** {techniques[0].confidence:.1%}")
+        
+        # Actionable recommendations
+        if results.get('relevant_techniques'):
+            with st.expander("💡 **Recommendations for SIEM Rule Improvement**", expanded=False):
+                techniques = results['relevant_techniques'][:3]
+                st.markdown("**Based on the top 3 MITRE technique mappings:**")
+                
+                for i, technique in enumerate(techniques):
+                    medal = ["🥇", "🥈", "🥉"][i]
+                    st.markdown(f"**{medal} {technique.id} - {technique.name}:**")
+                    if technique.confidence >= 0.9:
+                        st.markdown(f"   ✅ Excellent detection for this technique. Rule is well-tuned.")
+                    elif technique.confidence >= 0.8:
+                        st.markdown(f"   📈 Good detection. Consider adding additional indicators for complete coverage.")
+                    elif technique.confidence >= 0.7:
+                        st.markdown(f"   ⚠️ Moderate detection. Review rule logic for potential improvements.")
+                    else:
+                        st.markdown(f"   🔍 Low confidence. Consider alternative detection approaches for this technique.")
+                
+                st.markdown("**🎯 Overall Recommendation:**")
+                avg_confidence = sum(t.confidence for t in techniques) / len(techniques)
+                if avg_confidence >= 0.85:
+                    st.success("Your SIEM rule provides excellent coverage for the identified attack techniques. Consider deploying in production.")
+                elif avg_confidence >= 0.75:
+                    st.info("Good rule performance. Minor tuning could improve detection accuracy.")
+                elif avg_confidence >= 0.65:
+                    st.warning("Rule needs improvement. Consider adding more specific indicators or adjusting detection logic.")
+                else:
+                    st.error("Rule requires significant enhancement. Review detection approach and consider alternative strategies.")
+
+def get_confidence_label(confidence: float) -> str:
+    """Get confidence level label"""
+    if confidence >= 0.9:
+        return "Excellent Match"
+    elif confidence >= 0.8:
+        return "Very Good Match"
+    elif confidence >= 0.7:
+        return "Good Match"
+    elif confidence >= 0.6:
+        return "Moderate Match"
+    else:
+        return "Low Match"
+
+def get_confidence_color(confidence: float) -> str:
+    """Get color for confidence visualization"""
+    if confidence >= 0.9:
+        return "#28a745"  # Green
+    elif confidence >= 0.8:
+        return "#20c997"  # Teal
+    elif confidence >= 0.7:
+        return "#ffc107"  # Yellow
+    elif confidence >= 0.6:
+        return "#fd7e14"  # Orange
+    else:
+        return "#dc3545"  # Red
 
 def display_incident_response_page():
     """Enhanced incident response page"""
@@ -924,6 +1235,8 @@ def display_incident_response_page():
     
     # MITRE Classification
     classification = plan.get('mitre_classification', {})
+    top_techniques = results.get('relevant_techniques', [])[:3]  # Get top 3 techniques
+    
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -935,8 +1248,29 @@ def display_incident_response_page():
         st.info(classification.get('tactic', 'Unknown'))
     
     with col3:
-        st.markdown("**MITRE Technique**")
-        st.info(classification.get('technique', 'Unknown'))
+        st.markdown("**Top Technique**")
+        if top_techniques:
+            st.info(f"{top_techniques[0].id} ({top_techniques[0].confidence:.2f})")
+        else:
+            st.info(classification.get('technique', 'Unknown'))
+    
+    # Show all top 3 techniques if available
+    if top_techniques and len(top_techniques) > 1:
+        st.markdown("**🎯 All Mapped Techniques:**")
+        technique_cols = st.columns(len(top_techniques))
+        medals = ["🥇", "🥈", "🥉"]
+        
+        for i, (col, technique) in enumerate(zip(technique_cols, top_techniques)):
+            with col:
+                st.markdown(f"""
+                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                           color: white; padding: 0.8rem; border-radius: 8px; text-align: center; margin: 0.2rem;">
+                    <div style="font-size: 1.2em;">{medals[i]}</div>
+                    <div style="font-weight: bold;">{technique.id}</div>
+                    <div style="font-size: 0.8em;">{technique.name[:30]}...</div>
+                    <div style="font-size: 0.9em;">Confidence: {technique.confidence:.2f}</div>
+                </div>
+                """, unsafe_allow_html=True)
     
     # Description
     st.markdown("### 📝 Description")
@@ -1044,10 +1378,10 @@ def display_soar_workflow_page():
         return
     
     # Workflow Header
-    st.markdown("""
+    st.markdown(f"""
     <div class="main-header">
         <h2>🔄 SOAR Automation Workflow</h2>
-        <p>End-to-End Incident Response Automation (Generated by Claude Haiku)</p>
+        <p>End-to-End Incident Response Automation (Generated by {results.get('model_used', 'Claude AI')})</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -1203,6 +1537,7 @@ def main():
             
             st.info(f"🖥️ Platform: {results.get('siem_platform', 'Unknown')}")
             st.info(f"🎯 Techniques: {len(results.get('relevant_techniques', []))}")
+            st.info(f"🤖 Model: {results.get('model_used', 'Unknown')}")
         else:
             st.info("⏳ Ready for Analysis")
     
@@ -1218,7 +1553,8 @@ def main():
     st.markdown("---")
     st.markdown("""
     <div style='text-align: center; color: #666;'>
-        <p>🛡️ Cybersecurity Response Platform | Built with Streamlit & Claude API</p>
+        <p>🛡️ Cybersecurity Response Platform | Powered by Claude AI (All Models Supported)</p>
+        <p style='font-size: 0.8em;'>Compatible with Claude 4 Sonnet, Claude 4 Opus, Claude 3.5 Sonnet, Claude 3.5 Haiku & Legacy Models</p>
     </div>
     """, unsafe_allow_html=True)
 
