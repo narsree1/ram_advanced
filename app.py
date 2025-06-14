@@ -690,7 +690,7 @@ def display_mitre_mapping_page():
             )
     
     with col2:
-        analyze_button = st.button("🚀 Analyze Rule", type="primary", use_container_width=True, height=3)
+        analyze_button = st.button("🚀 Analyze Rule", type="primary", use_container_width=True)
         
         if st.session_state.get('analysis_results'):
             st.success("✅ Analysis Complete")
